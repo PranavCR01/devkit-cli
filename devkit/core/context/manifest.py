@@ -56,6 +56,18 @@ class Manifest:
                 wss.append(workstream)
             self.save(data)
 
+    def register_blueprint(
+        self, name: str, source_project: str, bp_dir: Path, token_estimate: int
+    ) -> None:
+        data = self.load()
+        data.setdefault("blueprints", {})[name] = {
+            "path": str(bp_dir),
+            "source_project": source_project,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "token_estimate": token_estimate,
+        }
+        self.save(data)
+
     def refresh_knowledge_graphs(self) -> None:
         data = self.load()
         for name in data["projects"]:

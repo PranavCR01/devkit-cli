@@ -2,6 +2,7 @@ import typer
 
 from devkit.commands.config_cmd import config_app
 from devkit.commands.context_cmd import context_app
+from devkit.commands.fork_cmd import fork_app
 from devkit.commands.memory_cmd import memory_app
 from devkit.commands.scan import scan
 from devkit.commands.search_cmd import search_cmd
@@ -15,6 +16,7 @@ app = typer.Typer(
 app.add_typer(config_app, name="config")
 app.add_typer(memory_app, name="memory")
 app.add_typer(context_app, name="context")
+app.add_typer(fork_app, name="fork")
 app.command()(scan)
 app.command(name="search")(search_cmd)
 
@@ -86,15 +88,6 @@ def _write_session_hook(hook_path: "typer.Path") -> None:  # type: ignore[name-d
     typer.echo(
         "  Register in ~/.claude/settings.json under hooks.SessionStart to enable injection."
     )
-
-
-@app.command()
-def fork(
-    source: str = typer.Argument(..., help="Source project path"),
-    target: str = typer.Argument(..., help="Target project path"),
-) -> None:
-    """Feature transplanting between projects (Slice 5)."""
-    typer.echo("fork: not yet implemented")
 
 
 @app.command()
