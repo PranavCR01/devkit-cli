@@ -2,6 +2,7 @@ import typer
 
 from devkit.commands.config_cmd import config_app
 from devkit.commands.context_cmd import context_app
+from devkit.commands.eval_cmd import eval_app
 from devkit.commands.fork_cmd import fork_app
 from devkit.commands.memory_cmd import memory_app
 from devkit.commands.scan import scan
@@ -17,6 +18,7 @@ app.add_typer(config_app, name="config")
 app.add_typer(memory_app, name="memory")
 app.add_typer(context_app, name="context")
 app.add_typer(fork_app, name="fork")
+app.add_typer(eval_app, name="eval")
 app.command()(scan)
 app.command(name="search")(search_cmd)
 
@@ -88,14 +90,6 @@ def _write_session_hook(hook_path: "typer.Path") -> None:  # type: ignore[name-d
     typer.echo(
         "  Register in ~/.claude/settings.json under hooks.SessionStart to enable injection."
     )
-
-
-@app.command()
-def eval(
-    action: str = typer.Argument(..., help="analyze | compress | dedupe"),
-) -> None:
-    """Token optimization and evaluation (Slice 6)."""
-    typer.echo("eval: not yet implemented")
 
 
 if __name__ == "__main__":

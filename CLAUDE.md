@@ -18,8 +18,8 @@ Transforms into a Claude Code skill in Slice 7.
 - `devkit memory save/list/contradict/switch/workstreams/snapshot` — temporal memory (Slice 2, working)
 - `devkit search` — cross-project semantic + keyword search (Slice 2, working)
 - `devkit context list/add/build/budget/clear/refresh/register/inject` — context assembly (Slice 4, working)
-- `devkit fork` — feature forking (Slice 5)
-- `devkit eval` — token optimization (Slice 6)
+- `devkit fork create/list/inspect/delete/apply` — feature blueprint extraction and injection (Slice 5, working)
+- `devkit eval start/stop/status/report/learn/verify/versions` — token optimization via Headroom proxy (Slice 6, working)
 
 ## Development
 ```
@@ -54,6 +54,18 @@ python -m devkit.cli --help
 - `devkit/core/search/rrf.py` — Reciprocal Rank Fusion (k=60)
 - `devkit/core/search/searcher.py` — public Python API: search(), detect_project(), get_backend()
 
+### Slice 5 — Fork (blueprint extraction)
+- `devkit/commands/fork_cmd.py` — fork_app: create/list/inspect/delete/apply subcommands
+- `devkit/core/fork/extractor.py` — SubgraphExtractor: personalized PageRank over Understand Anything's knowledge-graph.json; seed matching by name/path/tags; shared-dep detection by full-graph in-degree >= SHARED_THRESHOLD (3)
+- `devkit/core/fork/blueprint.py` — Blueprint: create (saves subgraph.json + blueprint.json), load, list_all, render_for_injection (XML-tagged block with facts + subgraph summary + transfer notes)
+
+### Slice 6 — Eval (token optimization)
+- `devkit/commands/eval_cmd.py` — eval_app: start/stop/status/report/learn/verify/versions subcommands
+- `devkit/core/eval/headroom_bridge.py` — HeadroomBridge: is_running, start (shutil.which), stop (PID file kill), get_stats, get_session_calls, compute_session_savings, setup_instructions; PID_FILE + _read_pid_file() helpers
+- `devkit/core/eval/ablation.py` — AblationWorker: async background ablation; samples 20% of requests >= 2000 tokens; Jaccard-distance threshold 0.15; saves candidates to ~/.devkit/eval/suggestions/
+- `devkit/core/eval/judge.py` — ClaudeJudge: order-swap bias mitigation; SAFE only when both orderings agree; uses Haiku with x-headroom-bypass header
+- `devkit/core/eval/versions.py` — save_version (requires [memory]); list_versions (raw sqlite3, no [memory] needed)
+
 ### Slice 4 — Context assembly
 - `devkit/commands/context_cmd.py` — context_app: list/add/build/budget/clear/refresh/register/inject subcommands
 - `devkit/core/context/manifest.py` — Manifest class: load/save ~/.devkit/manifest.json; register_project, update_scan, update_fact_count, update_workstream, refresh_knowledge_graphs (rescans graphs + recounts facts), get_all_context_items
@@ -63,11 +75,23 @@ python -m devkit.cli --help
 - `config.json` — API keys and settings
 - `state.db` — scan history
 - `memory.db` — facts, contradictions, episodes, workstreams, session_snapshots, FTS5 (facts_fts), sqlite-vec (fact_vec + fact_vec_map)
-- `manifest.json` — registry of all projects, knowledge graphs, fact counts, workstreams, blueprints; written by `devkit init`, updated by scan/memory save/memory switch
+- `manifest.json` — registry of all projects, knowledge graphs, fact counts, workstreams, blueprints; written by `devkit init`, updated by scan/memory save/memory switch/fork create
 - `context_session.json` — ephemeral; tracks current assembled context for `devkit context budget/clear`
 - `hooks/session-start.sh` — Claude Code SessionStart hook; calls `devkit context inject --format hook` (written by `devkit init`)
+- `blueprints/<name>/blueprint.json` — blueprint metadata: seed_query, seed_nodes, external_dependencies, memory_facts, stack_context, transfer_notes, node_count, edge_count, token_estimate
+- `blueprints/<name>/subgraph.json` — extracted nodes/edges (same schema as knowledge-graph.json, scoped to feature)
+- `eval/headroom.pid` — JSON `{"pid": N, "port": N}`; written by `devkit eval start`, deleted by `devkit eval stop`
+- `eval/suggestions/candidate-<id>.json` — ablation candidates: chunk_preview, tokens_saved, original_output, reduced_output, verified, verdict
 
 ## Rules
+- Fork has no runtime dep on `[memory]` — memory facts fetched via raw sqlite3 (same pattern as `_recount_facts`); fork must work even if [memory] extra is not installed
+- `fork create` requires networkx (`[graph]` extra); missing networkx raises ImportError with install hint at module load time, not at call time
+- `fork create --from <project>` uses `--from` as CLI flag; Python param is `from_project` (reserved word workaround)
+- Blueprint name defaults to `<feature>-pattern`; `--name` overrides; duplicate name prompts overwrite confirmation
+- Stack context auto-populated from `graph["metadata"]` if present, else `{}`; never hard-fail if absent
+- `fork create` note when no knowledge graph: show expected path + "run Understand Anything then devkit context refresh"
+- `Manifest.register_blueprint` is called after every successful `fork create`; wrapped in `try/except` so it never blocks blueprint creation
+- `fork delete` also removes the manifest entry inline (load → pop → save); no separate manifest method needed
 - Manifest triggers are best-effort — all calls to `Manifest()` in scan.py, memory_cmd.py are wrapped in `try/except Exception: pass`; never block the caller
 - `context inject` must never crash or print to stdout on error — it has 5 nested guards + outer `except Exception: pass`; the session hook depends on silent failure
 - `Manifest.refresh_knowledge_graphs()` also recounts facts via raw `sqlite3` (no sqlite-vec): `SELECT project, COUNT(*) FROM facts WHERE invalid_at IS NULL GROUP BY project`; matches by direct name then basename fallback
@@ -87,6 +111,16 @@ python -m devkit.cli --help
 - `_enrich_with_memory()` threshold is 0.020 RRF score (≈ rank-1 semantic result); spec's "0.80 cosine" doesn't map to RRF values
 - Pass a pre-warmed `Embedder` instance to `SQLiteBackend(db_path, embedder=...)` so the download spinner fires before the scan, not mid-scan
 - `--dismiss` in scan takes a memory fact ID (prefix ok), not a scan finding ID — use `devkit memory list --type vulnerability_pattern` to find IDs
+
+- Eval has no runtime dep on `[memory]` for read paths — `versions.list_versions()` uses raw sqlite3; only `versions.save_version()` imports SQLiteBackend
+- `devkit eval start` uses `shutil.which("headroom")` to locate the executable — never `python -m headroom` (headroom does not support module invocation)
+- `HeadroomBridge.start()` returns `None` if `shutil.which("headroom")` misses; eval_cmd.py checks this and prints `[!] headroom not found. Run: pip install -e '.[eval]'`
+- Stop mechanism is PID file kill only — Headroom has no HTTP shutdown endpoint; Windows uses `taskkill /F /PID <pid>`, non-Windows uses `os.kill(pid, SIGTERM)`
+- Headroom bypass header is `x-headroom-bypass: true` (NOT `X-Headroom-Skip`) — used in ablation.py and judge.py `extra_headers`
+- proxy.log JSONL field names: `input_tokens_original`, `input_tokens_optimized`, `tokens_saved` — NOT `input_tokens` or `compressed_tokens` as originally specced
+- `ClaudeJudge` requires both orderings to agree before returning SAFE — run1 safe = winner in ("B","tie"), run2 safe = winner in ("A","tie"); either disagreement → INCONCLUSIVE
+- Ablation is async background only — `AblationWorker.run()` must be started in an event loop; `enqueue()` is the only entry point from request handlers
+- `devkit eval versions` stores facts with `fact_type="pattern"`, `workstream="eval"`, content prefix `[PROMPT VERSION] ` — filter applied in raw SQL
 
 ## Windows Gotchas (Python 3.11, cp1252 terminal)
 - Do NOT use `✓`, `✗`, or any non-ASCII in `typer.echo()` or `console.print()` — cp1252 will crash
