@@ -1,0 +1,22 @@
+{
+    "name": "devkit",
+    "version": "1.0.0",
+    "description": "Developer context, security scanning, memory management, and token optimization for Claude Code",
+    "author": "PranavCR01",
+    "source": "https://github.com/PranavCR01/devkit-cli",
+    "components": {
+        "skills": [
+            "skills/scan/SKILL.md",
+            "skills/memory/SKILL.md",
+            "skills/search/SKILL.md",
+            "skills/context/SKILL.md",
+            "skills/fork/SKILL.md",
+            "skills/eval/SKILL.md"
+        ],
+        "agents": [
+            "agents/scan-triage.md",
+            "agents/blueprint-adapter.md"
+        ],
+        "hooks": "hooks/hooks.json"
+    }
+}
