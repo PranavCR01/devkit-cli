@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,7 +9,10 @@ from typing import Optional
 import typer
 from rich.console import Console
 
-from devkit.core.context.assembler import ContextAssembler
+from devkit.core.context.assembler import ContextAssembler, count_tokens
+from devkit.core.context.injector import (
+    build_injection, detect_project, fetch_item_content, load_session_items,
+)
 from devkit.core.context.manifest import Manifest
 
 context_app = typer.Typer(
@@ -23,19 +25,6 @@ console = Console()
 from devkit.paths import SESSION_FILE
 
 _TYPE_LABEL = {"graph": "[G]", "snapshot": "[S]", "workstream": "[W]", "blueprint": "[B]"}
-
-
-def _detect_project() -> str:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, cwd=str(Path.cwd()),
-        )
-        if result.returncode == 0:
-            return Path(result.stdout.strip()).name
-    except (OSError, FileNotFoundError):
-        pass
-    return Path.cwd().name
 
 
 def _format_age(dt_str: str) -> str:
@@ -58,84 +47,33 @@ def _format_age(dt_str: str) -> str:
 
 
 def _fetch_content(item: dict, manifest_data: dict) -> str:
-    item_type = item["type"]
-    proj_name = item["project"]
-
-    if item_type == "graph":
-        proj = manifest_data["projects"].get(proj_name, {})
-        kg = proj.get("knowledge_graph") or {}
-        graph_path = Path(kg.get("path", ""))
-        if not graph_path.exists():
-            return ""
-        try:
-            with open(graph_path, encoding="utf-8") as f:
-                graph = json.load(f)
-            nodes = graph.get("nodes", [])
-            edges = graph.get("edges", [])
-            lines = [
-                f"Knowledge Graph: {proj_name}",
-                f"Nodes: {len(nodes)}, Edges: {len(edges)}",
-            ]
-            for node in nodes[:50]:
-                name = node.get("name") or node.get("file") or str(node.get("id", ""))
-                ntype = node.get("type", "")
-                if name:
-                    lines.append(f"  {ntype + ': ' if ntype else ''}{name}")
-            if len(nodes) > 50:
-                lines.append(f"  ... and {len(nodes) - 50} more nodes")
-            return "\n".join(lines)
-        except Exception:
-            return ""
-
-    elif item_type in ("snapshot", "workstream"):
-        try:
-            from devkit.core.memory.sqlite_backend import MEMORY_DB, SQLiteBackend
-        except ImportError:
-            return ""
-        if not MEMORY_DB.exists():
-            return ""
-        try:
-            backend = SQLiteBackend(MEMORY_DB)
-            ws = item["name"] if item_type == "workstream" else None
-            facts = backend.list_facts(project=proj_name, workstream=ws, limit=20)
-            if not facts:
-                return ""
-            lines = [f"Project: {proj_name}"]
-            if ws:
-                lines.append(f"Workstream: {ws}")
-            for fact in facts:
-                lines.append(f"[{fact.fact_type.upper()}] {fact.content}")
-            return "\n".join(lines)
-        except Exception:
-            return ""
-
-    elif item_type == "blueprint":
-        bp = manifest_data.get("blueprints", {}).get(item["name"], {})
-        bp_path = Path(bp.get("path", ""))
-        if not bp_path.exists():
-            return ""
-        try:
-            return bp_path.read_text(encoding="utf-8")
-        except Exception:
-            return ""
-
-    return ""
-
-
-def _save_session(assembler: ContextAssembler) -> None:
     try:
+        return fetch_item_content(item, manifest_data)
+    except Exception:
+        return ""
+
+
+def _save_session(assembler: ContextAssembler, append: bool = False) -> None:
+    try:
+        new_items = [
+            {
+                "id": i["meta"].get("id", ""),
+                "type": i["meta"]["type"],
+                "project": i["meta"]["project"],
+                "name": i["meta"]["name"],
+                "tokens": count_tokens(i["content"]),
+            }
+            for i in assembler.items
+        ]
+        if append:
+            old = [x for x in load_session_items()
+                   if x.get("id") not in {n["id"] for n in new_items}]
+            new_items = old + new_items
         session = {
             "assembled_at": datetime.now(timezone.utc).isoformat(),
-            "token_count": assembler.current_tokens,
+            "token_count": sum(x.get("tokens", 0) for x in new_items),
             "token_cap": assembler.token_cap,
-            "items": [
-                {
-                    "type": i["meta"]["type"],
-                    "project": i["meta"]["project"],
-                    "name": i["meta"]["name"],
-                }
-                for i in assembler.items
-            ],
+            "items": new_items,
         }
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         SESSION_FILE.write_text(json.dumps(session, indent=2), encoding="utf-8")
@@ -244,7 +182,8 @@ def context_add(
     console.print(rendered)
     console.print()
     console.print(f"[dim]{assembler.summary()}[/dim]")
-    _save_session(assembler)
+    _save_session(assembler, append=True)
+    console.print("[dim]Pinned: included by the SessionStart hook until `devkit context clear`.[/dim]")
 
 
 @context_app.command("build")
@@ -328,6 +267,7 @@ def context_build(
     console.print()
     console.print(assembler.render())
     _save_session(assembler)
+    console.print("[dim]Pinned: included by the SessionStart hook until `devkit context clear`.[/dim]")
 
 
 @context_app.command("budget")
@@ -394,41 +334,26 @@ def context_inject(
     fmt: str = typer.Option("human", "--format", help="human | hook"),
     token_cap: int = typer.Option(2000, "--token-cap"),
 ) -> None:
-    """Auto-inject session snapshot (used by the session-start hook)."""
+    """Emit session context (pinned items + RRF-ranked memory). Used by the SessionStart hook.
+
+    With --format hook, reads the hook's JSON from stdin (for `cwd`) and never
+    fails loudly: any error produces no output and exit code 0.
+    """
     try:
-        proj = project or _detect_project()
-
-        try:
-            from devkit.core.memory.sqlite_backend import MEMORY_DB, SQLiteBackend
-        except ImportError:
-            return
-
-        if not MEMORY_DB.exists():
-            return
-
-        try:
-            backend = SQLiteBackend(MEMORY_DB)
-        except Exception:
-            return
-
-        try:
-            facts = backend.list_facts(project=proj, limit=50)
-        except Exception:
-            return
-
-        if not facts:
-            return
-
-        content = "\n".join(
-            f"[{fact.fact_type.upper()}] {fact.content}" for fact in facts
-        )
-        assembler = ContextAssembler(token_cap=token_cap)
-        meta = {"type": "snapshot", "project": proj, "name": "session-snapshot"}
-        assembler.add_item(meta, content)
-
-        rendered = assembler.render()
+        cwd = Path.cwd()
+        if fmt == "hook" and not sys.stdin.isatty():
+            try:
+                payload = json.loads(sys.stdin.read() or "{}")
+                if payload.get("cwd"):
+                    cwd = Path(payload["cwd"])
+            except Exception:
+                pass
+        proj = project or detect_project(cwd)
+        rendered = build_injection(proj, token_cap=token_cap, cwd=cwd)
         if rendered:
             typer.echo(rendered)
-
+        elif fmt != "hook":
+            typer.echo(f"No context to inject for project '{proj}'.")
     except Exception:
-        pass
+        if fmt != "hook":
+            raise
