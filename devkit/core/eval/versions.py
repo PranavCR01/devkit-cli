@@ -14,13 +14,14 @@ def save_version(content: str, project: str) -> str | None:
     try:
         from devkit.core.memory.sqlite_backend import MEMORY_DB as MDB, SQLiteBackend
         backend = SQLiteBackend(MDB)
-        return backend.save(
+        fact = backend.save(
             content=f"{_PREFIX}{content}",
             fact_type="pattern",
             project=project,
             workstream="eval",
             source="devkit-eval",
         )
+        return fact.id
     except Exception:
         return None
 
