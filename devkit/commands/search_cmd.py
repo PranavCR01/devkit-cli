@@ -1,24 +1,9 @@
 from __future__ import annotations
 
 import json
-import subprocess
-from pathlib import Path
 from typing import Optional
 
 import typer
-
-
-def _detect_project() -> str:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, cwd=str(Path.cwd()),
-        )
-        if result.returncode == 0:
-            return Path(result.stdout.strip()).name
-    except (OSError, FileNotFoundError):
-        pass
-    return Path.cwd().name
 
 
 def search_cmd(

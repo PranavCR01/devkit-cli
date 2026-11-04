@@ -74,3 +74,12 @@ class MemoryStore(ABC):
     @abstractmethod
     def list_projects(self) -> list[str]:
         """List all projects with stored facts."""
+
+    # Non-abstract so existing/third-party backends keep working.
+    def active_workstream(self, project: str) -> str | None:
+        """Name of the project's active workstream, if any."""
+        return None
+
+    def set_active_workstream(self, name: str, project: str) -> None:
+        """Mark `name` as the project's active workstream (creating it if needed)."""
+        raise NotImplementedError
