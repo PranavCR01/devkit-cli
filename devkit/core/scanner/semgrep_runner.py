@@ -1,16 +1,66 @@
 from __future__ import annotations
 import json
+import os
 import subprocess
 from typing import Literal
 
 Severity = Literal["critical", "high", "medium", "low", "info"]
 
+# Mode-level packs; language packs are added for languages actually present.
 RULESETS: dict[str, list[str]] = {
-    "web": ["p/owasp-top-ten", "p/javascript", "p/typescript", "p/react", "p/nodejs"],
-    "api": ["p/owasp-top-ten", "p/javascript", "p/typescript", "p/nodejs"],
+    "web": ["p/owasp-top-ten"],
+    "api": ["p/owasp-top-ten"],
     "ai":  ["p/owasp-top-ten", "p/secrets"],
-    "all": ["p/owasp-top-ten", "p/secrets", "p/javascript", "p/typescript", "p/react", "p/nodejs"],
+    "all": ["p/owasp-top-ten", "p/secrets"],
 }
+
+LANGUAGE_RULESETS: dict[str, list[str]] = {
+    "javascript": ["p/javascript", "p/nodejs"],
+    "typescript": ["p/typescript", "p/nodejs"],
+    "react": ["p/react"],
+    "python": ["p/python"],
+    "go": ["p/golang"],
+    "java": ["p/java"],
+    "ruby": ["p/ruby"],
+    "php": ["p/php"],
+    "csharp": ["p/csharp"],
+}
+
+_EXT_LANG = {
+    ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".jsx": "react",
+    ".ts": "typescript", ".tsx": "react", ".py": "python", ".go": "go", ".java": "java",
+    ".rb": "ruby", ".php": "php", ".cs": "csharp",
+}
+_SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "vendor", "__pycache__", ".venv", "venv"}
+
+
+def detect_languages(path: str, max_files: int = 20000) -> set[str]:
+    langs: set[str] = set()
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        for name in filenames:
+            seen += 1
+            ext = os.path.splitext(name)[1].lower()
+            if ext in _EXT_LANG:
+                langs.add(_EXT_LANG[ext])
+            if seen >= max_files:
+                return langs
+    if "react" in langs:
+        langs.add("javascript")
+    return langs
+
+
+def rulesets_for(mode: str, languages: set[str]) -> list[str]:
+    configs = list(RULESETS.get(mode, RULESETS["all"]))
+    for lang in sorted(languages):
+        if mode == "ai" and lang == "react":
+            continue
+        for rs in LANGUAGE_RULESETS.get(lang, []):
+            if rs not in configs:
+                configs.append(rs)
+    return configs
+
 
 SEMGREP_SEVERITY_MAP: dict[str, Severity] = {
     "ERROR":   "critical",
@@ -24,18 +74,18 @@ def _map_severity(semgrep_severity: str) -> Severity:
 
 
 def _map_refs(check_id: str) -> tuple[str | None, str | None]:
-    """Infer (owasp_ref, cwe_ref) from the check_id string."""
+    """Infer (owasp_ref, cwe_ref) from the check_id string (OWASP Top 10 2025 numbering)."""
     cid = check_id.lower()
     if "sql" in cid:
-        return ("A03:2025", "CWE-89")
+        return ("A05:2025", "CWE-89")
     if "xss" in cid:
-        return ("A03:2025", "CWE-79")
-    if any(k in cid for k in ("secret", "key", "token")):
-        return ("A02:2025", "CWE-798")
+        return ("A05:2025", "CWE-79")
+    if any(k in cid for k in ("secret", "api-key", "apikey", "hardcoded", "token")):
+        return ("A07:2025", "CWE-798")
     if "auth" in cid:
-        return ("A01:2025", "CWE-306")
-    if "injection" in cid:
-        return ("A03:2025", "CWE-74")
+        return ("A07:2025", "CWE-306")
+    if "injection" in cid or "exec" in cid:
+        return ("A05:2025", "CWE-74")
     return (None, None)
 
 
@@ -92,7 +142,7 @@ def parse_semgrep_output(stdout: str) -> list[dict]:
 class SemgrepRunner:
     def run(self, path: str, mode: str, timeout: int = 120) -> list[dict]:
         """Run semgrep as a subprocess and return parsed findings."""
-        configs = self._get_configs(mode)
+        configs = self._get_configs(mode, path)
         cmd = ["semgrep", "--json", "--quiet", "--timeout", str(timeout)]
         for config in configs:
             cmd += ["--config", config]
@@ -119,8 +169,8 @@ class SemgrepRunner:
 
         return parse_semgrep_output(stdout)
 
-    def _get_configs(self, mode: str) -> list[str]:
-        return RULESETS.get(mode, RULESETS["all"])
+    def _get_configs(self, mode: str, path: str = ".") -> list[str]:
+        return rulesets_for(mode, detect_languages(path))
 
     def check_installed(self) -> bool:
         """Return True if semgrep is available on PATH."""

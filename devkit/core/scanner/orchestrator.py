@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 from devkit.config import DEFAULT_MODEL
 
-from .classifier import FileClassifier
+from .classifier import FileClassifier, to_project_relative
 from .claude_analyzer import ClaudeAnalyzer
 from .graph_guide import GraphGuide
 from .scorer import calculate_scores
@@ -108,7 +108,9 @@ class ScanOrchestrator:
 
         # 2. Classify files
         classifier = FileClassifier(max_file_bytes=self._max_file_bytes)
-        tier1_files, tier2_files = classifier.classify(path, graph=graph)
+        tier1_files, tier2_files = classifier.classify(
+            path, graph=graph, priority_paths=guide.get_tier1_files() if graph_guided else None,
+        )
 
         # 3. Parallel semgrep + Claude
         semgrep_raw, claude_raw = await asyncio.gather(
@@ -117,6 +119,9 @@ class ScanOrchestrator:
         )
 
         # 4. Merge (semgrep wins on structure, Claude enriches prose)
+        for raw in (*semgrep_raw, *claude_raw):
+            if raw.get("file_path"):
+                raw["file_path"] = to_project_relative(raw["file_path"], path)
         merged = self._merge(semgrep_raw, claude_raw)
 
         # 5. Score
@@ -239,15 +244,23 @@ class ScanOrchestrator:
 
     @staticmethod
     def _merge(semgrep_raw: list[dict], claude_raw: list[dict]) -> dict[str, dict]:
-        """Deduplicate on file_path:line_start. Semgrep wins; Claude enriches prose."""
+        """Deduplicate on file_path:line_start. Semgrep wins; Claude enriches prose.
+
+        Several semgrep rules on one line are all kept (keyed by rule id too);
+        a Claude finding on that line enriches the first of them.
+        """
         merged: dict[str, dict] = {}
 
         for f in claude_raw:
             key = f"{f.get('file_path', '')}:{f.get('line_start', 0)}"
+            if key in merged:
+                key += f":{len(merged)}"
             merged[key] = {**f, "source": "claude"}
 
         for f in semgrep_raw:
             key = f"{f.get('file_path', '')}:{f.get('line_start', 0)}"
+            if key in merged and merged[key].get("source") == "semgrep":
+                key += f":{f.get('title', '')}"
             if key in merged:
                 existing = merged[key]
                 merged[key] = {
