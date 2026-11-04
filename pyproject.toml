@@ -23,6 +23,7 @@ graph = [
     "tree-sitter>=0.23.0",
     "networkx>=3.0",
     "numpy>=1.26.0",
+    "scipy>=1.11.0",  # networkx.pagerank requires scipy
 ]
 eval = [
     "headroom-ai[proxy]>=0.1.0",
@@ -38,6 +39,7 @@ dev = [
     "numpy>=1.26.0",
     "sqlite-vec>=0.1.0",
     "networkx>=3.0",
+    "scipy>=1.11.0",
 ]
 
 [project.scripts]

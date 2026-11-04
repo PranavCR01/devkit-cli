@@ -10,7 +10,7 @@ from typing import Optional
 import typer
 from rich.console import Console
 
-from devkit.core.fork.blueprint import BLUEPRINTS_DIR, Blueprint
+from devkit.core.fork.blueprint import BLUEPRINTS_DIR, Blueprint, blueprint_dir
 from devkit.core.context.manifest import Manifest
 
 fork_app = typer.Typer(
@@ -196,8 +196,11 @@ def fork_create(
 
     # Determine blueprint name
     bp_name = name or f"{feature.lower().replace(' ', '-')}-pattern"
-
-    bp_dir = BLUEPRINTS_DIR / bp_name
+    try:
+        bp_dir = blueprint_dir(bp_name)
+    except ValueError as exc:
+        typer.echo(f"[!] {exc}")
+        raise typer.Exit(code=1)
     if bp_dir.exists():
         overwrite = typer.confirm(
             f"\nBlueprint '{bp_name}' already exists. Overwrite?", default=False
@@ -218,6 +221,7 @@ def fork_create(
             external_dependencies=external_deps,
             memory_facts=memory_facts,
             stack_context=stack_context,
+            seed_nodes=extractor.last_seed_ids,
         )
     except Exception as exc:
         typer.echo(f"[!] Failed to create blueprint: {exc}")
@@ -322,8 +326,12 @@ def fork_delete(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Remove a blueprint and its manifest entry."""
-    bp_dir = BLUEPRINTS_DIR / name
-    if not bp_dir.exists():
+    try:
+        bp_dir = blueprint_dir(name)
+    except ValueError as exc:
+        typer.echo(f"[!] {exc}")
+        raise typer.Exit(code=1)
+    if not (bp_dir / "blueprint.json").exists():
         typer.echo(f"[!] Blueprint '{name}' not found.")
         raise typer.Exit(code=1)
 
