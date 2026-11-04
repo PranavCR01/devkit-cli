@@ -49,6 +49,9 @@ devkit = "devkit.cli:app"
 where = ["."]
 include = ["devkit*"]
 
+[tool.setuptools.package-data]
+devkit = ["data/*.jsonl"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

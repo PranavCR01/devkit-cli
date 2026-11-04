@@ -271,6 +271,51 @@ def ablate_cmd(
     typer.echo("Details: devkit eval report")
 
 
+@eval_app.command("bench")
+def bench_cmd(
+    dataset: Optional[Path] = typer.Argument(None, help="JSONL dataset (default: bundled judge_bench.jsonl)."),
+    samples: int = typer.Option(1, "--samples", help="Judge samples per ordering."),
+    model: Optional[str] = typer.Option(None, "--model", help="Judge model (default: fast_model)."),
+    output: str = typer.Option("text", "--output", help="text | json"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate the dataset and print the call budget."),
+) -> None:
+    """Benchmark the judge on labeled cases: accuracy, false-SAFE rate, order agreement."""
+    from devkit.core.eval.bench import DEFAULT_DATASET, load_dataset, run_bench, save_report
+
+    path = dataset or DEFAULT_DATASET
+    try:
+        cases = load_dataset(path)
+    except (ValueError, json.JSONDecodeError, OSError) as exc:
+        typer.echo(f"[ERROR] {exc}")
+        raise typer.Exit(1)
+    n_eq = sum(c["label"] == "equivalent" for c in cases)
+    if dry_run:
+        typer.echo(f"{len(cases)} cases ({n_eq} equivalent, {len(cases) - n_eq} degraded); "
+                   f"{len(cases) * 2 * samples} judge calls.")
+        return
+    key = _api_key()
+    if not key:
+        typer.echo("[ERROR] No API key configured. Run: devkit config set anthropic_api_key <key>")
+        raise typer.Exit(1)
+    from devkit.core.eval.judge import ClaudeJudge
+    judge = ClaudeJudge(api_key=key, model=model, samples=samples)
+    rep = run_bench(judge, cases)
+    saved = save_report(rep, judge.model, samples, str(path))
+    if output == "json":
+        typer.echo(json.dumps(rep.to_dict(), indent=2))
+        return
+    table = Table(title=f"Judge benchmark ({judge.model}, samples={samples})", box=rich.box.ASCII)
+    table.add_column("Metric")
+    table.add_column("Value")
+    for k, v in rep.summary().items():
+        table.add_row(k, str(v))
+    _console.print(table)
+    for row in rep.rows:
+        if not row["correct"]:
+            typer.echo(f"  MISS {row['id']:<22} label={row['label']:<10} verdict={row['verdict']}")
+    typer.echo(f"Saved: {saved}")
+
+
 @eval_app.command("verify")
 def verify_cmd(
     candidate_id: str = typer.Argument(..., help="Candidate ID or prefix to verify."),
