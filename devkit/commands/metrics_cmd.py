@@ -57,6 +57,12 @@ def metrics_cmd(
     usage, skipped = tp.load_usage(paths, price_table, project_filter=project)
 
     report = tp.compute(pr_list, usage, period=period, since=since_dt)
+    try:
+        from devkit.core.handoff.ledger import LEDGER_DB, Ledger
+        if LEDGER_DB.exists():
+            report["orchestration"] = Ledger().stats(project)
+    except Exception:
+        pass
     report["sources"] = {"transcript_files": len(paths), "usage_records": len(usage),
                          "unparseable_lines": skipped, "prs": len(pr_list)}
 
@@ -87,4 +93,9 @@ def metrics_cmd(
         typer.echo(f"[i] {t['unpriced_tokens']:,} tokens from models without a price entry (use --prices)")
     for p in report["top_prs_by_cost"]:
         typer.echo(f"  #{p['number']:<5} ${p['ai_cost_usd']:>7.2f}  {p['title'][:60]}")
+    if report.get("orchestration"):
+        o = report["orchestration"]
+        typer.echo(f"Agent tasks: {o['completed']} done | {o['handoffs']} handoffs | "
+                   f"{o['recoveries']} recoveries | {o['integration_conflicts']} conflicts | "
+                   f"{o['manual_interventions']} interventions")
     typer.echo("Costs are list-price estimates; transcript format is internal to Claude Code.")

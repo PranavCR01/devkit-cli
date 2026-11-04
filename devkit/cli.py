@@ -4,6 +4,7 @@ from devkit.commands.config_cmd import config_app
 from devkit.commands.context_cmd import context_app
 from devkit.commands.eval_cmd import eval_app
 from devkit.commands.fork_cmd import fork_app
+from devkit.commands.handoff_cmd import handoff_app
 from devkit.commands.memory_cmd import memory_app
 from devkit.commands.metrics_cmd import metrics_cmd
 from devkit.commands.scan import scan
@@ -20,6 +21,7 @@ app.add_typer(memory_app, name="memory")
 app.add_typer(context_app, name="context")
 app.add_typer(fork_app, name="fork")
 app.add_typer(eval_app, name="eval")
+app.add_typer(handoff_app, name="handoff")
 app.command()(scan)
 app.command(name="search")(search_cmd)
 app.command(name="metrics")(metrics_cmd)
