@@ -9,7 +9,6 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from devkit.core.memory.sqlite_backend import MEMORY_DB, SQLiteBackend
 
 memory_app = typer.Typer(
     name="memory",
@@ -37,11 +36,12 @@ def _detect_project() -> str:
     return Path.cwd().name
 
 
-def _get_backend() -> SQLiteBackend:
+def _get_backend():
     try:
+        from devkit.core.memory.sqlite_backend import MEMORY_DB, SQLiteBackend
         return SQLiteBackend(MEMORY_DB)
-    except RuntimeError as exc:
-        typer.echo(f"[!] {exc}")
+    except (ImportError, RuntimeError) as exc:
+        typer.echo(f"[!] {exc} -- run: pip install -e '.[memory]'")
         raise typer.Exit(code=1)
 
 

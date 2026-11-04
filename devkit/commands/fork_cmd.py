@@ -42,7 +42,7 @@ def _format_age(dt_str: str) -> str:
 
 def _get_project_facts(project_name: str, project_path: str) -> list[dict]:
     """Fetch valid facts for a project via raw sqlite3 (no [memory] extra needed)."""
-    memory_db = Path.home() / ".devkit" / "memory.db"
+    from devkit.paths import MEMORY_DB as memory_db
     if not memory_db.exists():
         return []
     try:

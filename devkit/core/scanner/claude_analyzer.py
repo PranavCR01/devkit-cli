@@ -6,6 +6,8 @@ from pathlib import Path
 
 import anthropic
 
+from devkit.config import DEFAULT_MODEL
+
 from .prompts import AI_ADDITIONS, API_ADDITIONS, SECURITY_SYSTEM_PROMPT, WEB_ADDITIONS
 
 CHUNK_SIZE_LINES = 2_000
@@ -13,7 +15,7 @@ TIER2_LINE_CAP = 8_000
 
 
 class ClaudeAnalyzer:
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6") -> None:
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL) -> None:
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = model
 

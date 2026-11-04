@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import typer
 from rich.console import Console
+import rich.box
 from rich.table import Table
 
 from devkit.config import DEVKIT_DIR, Config
@@ -21,7 +22,11 @@ def config_set(
     """Set a config value."""
     key = key.lower()
     cfg = Config()
-    cfg.set(key, value)
+    try:
+        cfg.set(key, value)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/red] {key}: {exc}")
+        raise typer.Exit(code=1)
     display = _HIDDEN if key in _SENSITIVE else value
     console.print(f"[green]OK[/green] {key} = {display}")
 
@@ -45,7 +50,7 @@ def config_get(
 def config_list() -> None:
     """List all config values."""
     cfg = Config()
-    table = Table(title="DevKit Config  (~/.devkit/config.json)", show_header=True)
+    table = Table(title="DevKit Config", show_header=True, box=rich.box.ASCII)
     table.add_column("Key", style="bold")
     table.add_column("Value")
     table.add_column("Source")

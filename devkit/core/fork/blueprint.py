@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-BLUEPRINTS_DIR = Path.home() / ".devkit" / "blueprints"
+from devkit.paths import BLUEPRINTS_DIR
 
 
 class Blueprint:

@@ -7,12 +7,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import numpy as np
-
 from devkit.core.memory.store import Fact, FactType, MemoryStore, SearchResult
 from devkit.core.search.rrf import rrf_merge
 
-MEMORY_DB = Path.home() / ".devkit" / "memory.db"
+from devkit.paths import MEMORY_DB
 CONTRADICTION_THRESHOLD = 0.85
 EMBEDDING_DIM = 384
 
@@ -419,6 +417,8 @@ class SQLiteBackend(MemoryStore):
                    WHERE fact_type = ? AND project = ? AND invalid_at IS NULL""",
                 (fact_type, project),
             ).fetchall()
+
+        import numpy as np  # lazy: numpy ships with the [memory] extra only
 
         new_vec = np.array(embedding, dtype=np.float32)
         contradicted: list[str] = []

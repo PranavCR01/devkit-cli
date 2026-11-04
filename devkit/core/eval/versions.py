@@ -2,7 +2,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-MEMORY_DB = Path.home() / ".devkit" / "memory.db"
+from devkit.paths import MEMORY_DB
 _PREFIX = "[PROMPT VERSION] "
 
 

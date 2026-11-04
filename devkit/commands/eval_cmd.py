@@ -18,7 +18,7 @@ eval_app = typer.Typer(
 )
 _console = Console()
 
-_SUGGESTIONS_DIR = Path.home() / ".devkit" / "eval" / "suggestions"
+from devkit.paths import SUGGESTIONS_DIR as _SUGGESTIONS_DIR
 
 
 def _api_key() -> str | None:

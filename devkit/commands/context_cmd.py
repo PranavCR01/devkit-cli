@@ -20,7 +20,7 @@ context_app = typer.Typer(
 )
 console = Console()
 
-SESSION_FILE = Path.home() / ".devkit" / "context_session.json"
+from devkit.paths import SESSION_FILE
 
 _TYPE_LABEL = {"graph": "[G]", "snapshot": "[S]", "workstream": "[W]", "blueprint": "[B]"}
 

@@ -82,7 +82,7 @@ def scan(
 
     orchestrator = ScanOrchestrator(
         api_key=cfg.get("anthropic_api_key"),
-        model=cfg.get("default_model") or "claude-sonnet-4-6",
+        model=cfg.get("default_model"),
         memory_store=memory_store,
         auto_learn=auto_learn,
     )

@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from devkit.core.memory.store import MemoryStore, SearchResult
 
+from devkit.config import DEFAULT_MODEL
+
 from .classifier import FileClassifier
 from .claude_analyzer import ClaudeAnalyzer
 from .graph_guide import GraphGuide
@@ -57,7 +59,7 @@ class ScanOrchestrator:
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-sonnet-4-6",
+        model: str = DEFAULT_MODEL,
         memory_store: "MemoryStore | None" = None,
         auto_learn: bool = False,
     ) -> None:

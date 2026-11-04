@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-STATE_DB = Path.home() / ".devkit" / "state.db"
+from devkit.paths import STATE_DB
 
 
 class State:

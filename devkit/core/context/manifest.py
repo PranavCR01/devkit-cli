@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-MANIFEST_PATH = Path.home() / ".devkit" / "manifest.json"
+from devkit.paths import MANIFEST_PATH, MEMORY_DB
 
 
 class Manifest:
@@ -78,7 +78,7 @@ class Manifest:
     def _recount_facts(self, data: dict) -> None:
         """Recount valid facts per project directly from memory.db via raw sqlite3."""
         import sqlite3
-        memory_db = Path.home() / ".devkit" / "memory.db"
+        memory_db = MEMORY_DB
         if not memory_db.exists():
             return
         try:

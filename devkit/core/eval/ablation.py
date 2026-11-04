@@ -10,7 +10,7 @@ import anthropic
 ABLATION_TRIGGER_TOKENS = 2000
 ABLATION_SAMPLE_RATE = 0.20
 ABLATION_MIN_CHUNK_TOKENS = 100
-SUGGESTIONS_DIR = Path.home() / ".devkit" / "eval" / "suggestions"
+from devkit.paths import SUGGESTIONS_DIR
 # Correct Headroom bypass header (x-headroom-bypass, not X-Headroom-Skip)
 SKIP_HEADER = "x-headroom-bypass"
 
