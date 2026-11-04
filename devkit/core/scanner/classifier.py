@@ -140,6 +140,9 @@ def classify_files(
 class FileClassifier:
     """High-level classifier that walks a project directory."""
 
+    def __init__(self, max_file_bytes: int | None = None) -> None:
+        self.max_file_bytes = max_file_bytes or MAX_FILE_BYTES
+
     def classify(
         self,
         project_path: str,
@@ -159,7 +162,7 @@ class FileClassifier:
                 continue
             if any(part in SKIP_DIRS for part in p.parts):
                 continue
-            if p.stat().st_size > MAX_FILE_BYTES:
+            if p.stat().st_size > self.max_file_bytes:
                 continue
             try:
                 content = p.read_text(encoding="utf-8", errors="ignore")

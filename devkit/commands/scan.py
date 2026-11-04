@@ -49,11 +49,6 @@ def scan(
 ) -> None:
     """Run a security scan on a local directory."""
     cfg = Config()
-    missing = cfg.validate()
-    if missing:
-        console.print(f"[red]Error:[/red] Missing config: {', '.join(missing)}")
-        console.print("  Run: devkit config set ANTHROPIC_API_KEY <your-key>")
-        raise typer.Exit(code=1)
 
     if dismiss:
         store = _get_memory_store()
@@ -77,14 +72,36 @@ def scan(
         typer.echo(f"[OK] Finding {dismiss[:8]}... dismissed. Will not resurface in future scans.")
         return
 
+    if mode not in ("web", "api", "ai", "all"):
+        console.print(f"[red]Error:[/red] --mode must be web | api | ai | all (got {mode!r})")
+        raise typer.Exit(code=1)
+    if not Path(path).is_dir():
+        console.print(f"[red]Error:[/red] Not a directory: {path}")
+        raise typer.Exit(code=1)
+    if no_claude and no_semgrep:
+        console.print("[red]Error:[/red] --no-claude and --no-semgrep together leave nothing to run.")
+        raise typer.Exit(code=1)
+    if not no_claude and cfg.validate():
+        console.print("[red]Error:[/red] Missing config: anthropic_api_key")
+        console.print("  Run: devkit config set anthropic_api_key <your-key>  (or use --no-claude)")
+        raise typer.Exit(code=1)
+
     memory_store = _get_memory_store()
-    auto_learn = bool(cfg.get("auto_learn"))
+    auto_learn = cfg.get("auto_learn") is True
+
+    from devkit.core.context.injector import detect_project
+    project_name = detect_project(Path(path).resolve())
 
     orchestrator = ScanOrchestrator(
         api_key=cfg.get("anthropic_api_key"),
         model=cfg.get("default_model"),
         memory_store=memory_store,
         auto_learn=auto_learn,
+        project_name=project_name,
+        semgrep_timeout=int(cfg.get("semgrep_timeout")),
+        max_file_bytes=int(cfg.get("scan_max_file_size_kb")) * 1024,
+        tier2_line_cap=int(cfg.get("scan_tier2_line_cap")),
+        max_concurrency=int(cfg.get("scan_max_concurrency")),
     )
 
     result = asyncio.run(
@@ -114,16 +131,16 @@ def scan(
             path=result.project_path,
             mode=result.mode,
             findings_count=len(result.findings),
-            grade=result.grade,
+            grade=result.display_grade,
             security_score=result.security_score,
             quality_score=result.quality_score,
         )
         console.print(f"\n[dim]Saved: {result.scan_id}[/dim]")
 
     try:
-        from devkit.core.context.manifest import Manifest
-        proj_name = Path(path).resolve().name
-        Manifest().update_scan(proj_name, result.grade)
+        if not result.incomplete:  # never record a grade for a partial scan
+            from devkit.core.context.manifest import Manifest
+            Manifest().update_scan(project_name, result.grade)
     except Exception:
         pass
 
@@ -153,7 +170,7 @@ def scan(
                     memory_store.save(
                         content=content,
                         fact_type="vulnerability_pattern",
-                        project=result.project_path,
+                        project=project_name,
                         source="scan",
                     )
                 typer.echo(f"[OK] Stored {len(seen)} pattern(s) in memory.")
@@ -162,7 +179,7 @@ def scan(
 def _print_text(result: ScanResult) -> None:
     graph_label = "YES" if result.graph_guided else "NO"
     console.print()
-    console.print(f"[bold]DevKit Security Scan[/bold] — {result.project_path}")
+    console.print(f"[bold]DevKit Security Scan[/bold] -- {result.project_path}")
     console.print(
         f"Mode: {result.mode} | Files: {result.files_scanned:,} | "
         f"Lines: {result.lines_scanned:,} | Time: {result.scan_duration_seconds}s"
@@ -171,16 +188,24 @@ def _print_text(result: ScanResult) -> None:
     console.print()
 
     grade_color = {"A": "green", "B": "green", "C": "yellow", "D": "red", "F": "bold red"}.get(
-        result.grade, "white"
+        result.display_grade, "yellow"
     )
     console.print(
-        f"Grade: [{grade_color}]{result.grade}[/{grade_color}]  |  "
+        f"Grade: [{grade_color}]{result.display_grade}[/{grade_color}]  |  "
         f"Security: {result.security_score}  |  Quality: {result.quality_score}"
     )
+    if result.incomplete:
+        console.print(
+            f"[yellow]Partial scan: scores cover only what was analyzed "
+            f"(provisional grade {result.grade}).[/yellow]"
+        )
+    for w in result.warnings:
+        console.print(f"[yellow][WARN][/yellow] {w}")
     console.print()
 
     if not result.findings:
-        console.print("[green]No findings. Clean scan.[/green]")
+        console.print("No findings in the analyzed code." if result.incomplete
+                      else "[green]No findings. Clean scan.[/green]")
         return
 
     by_severity: dict[str, list[Finding]] = {}
@@ -194,11 +219,11 @@ def _print_text(result: ScanResult) -> None:
             continue
         color = _SEVERITY_COLORS[sev]
         console.print(f"[{color}]{sev.upper()} ({len(group)})[/{color}]")
-        console.print("─" * 50)
+        console.print("-" * 50)
         for finding in group:
             loc = f"{finding.file_path}:{finding.line_start}"
             mem_badge = "  [M] Seen before" if finding.memory_match else ""
-            console.print(f"[bold][{idx}] {finding.title}{mem_badge}[/bold] — {loc}")
+            console.print(f"[bold]\\[{idx}] {finding.title}{mem_badge}[/bold] -- {loc}")
             if finding.memory_match:
                 m = finding.memory_match
                 console.print(
@@ -231,6 +256,8 @@ def _to_json(result: ScanResult) -> str:
         "project_path": result.project_path,
         "mode": result.mode,
         "grade": result.grade,
+        "incomplete": result.incomplete,
+        "warnings": result.warnings,
         "security_score": result.security_score,
         "quality_score": result.quality_score,
         "files_scanned": result.files_scanned,
