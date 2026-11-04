@@ -5,12 +5,13 @@ from devkit.commands.context_cmd import context_app
 from devkit.commands.eval_cmd import eval_app
 from devkit.commands.fork_cmd import fork_app
 from devkit.commands.memory_cmd import memory_app
+from devkit.commands.metrics_cmd import metrics_cmd
 from devkit.commands.scan import scan
 from devkit.commands.search_cmd import search_cmd
 
 app = typer.Typer(
     name="devkit",
-    help="DevKit -- security scanning, memory, search, context, fork, and eval.",
+    help="DevKit -- security scanning, memory, search, context, fork, eval, metrics, and handoff.",
     no_args_is_help=True,
 )
 
@@ -21,6 +22,7 @@ app.add_typer(fork_app, name="fork")
 app.add_typer(eval_app, name="eval")
 app.command()(scan)
 app.command(name="search")(search_cmd)
+app.command(name="metrics")(metrics_cmd)
 
 
 HOOK_COMMAND = "devkit context inject --format hook 2>/dev/null || true"
