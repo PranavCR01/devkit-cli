@@ -13,7 +13,7 @@ from rich.table import Table
 
 eval_app = typer.Typer(
     name="eval",
-    help="Token optimization via Headroom proxy.",
+    help="Context ablation, judge verification and benchmarking, Headroom proxy.",
     no_args_is_help=True,
 )
 _console = Console()

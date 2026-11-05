@@ -19,12 +19,15 @@ Transforms into a Claude Code skill in Slice 7.
 - `devkit search` — cross-project semantic + keyword search (Slice 2, working)
 - `devkit context list/add/build/budget/clear/refresh/register/inject` — context assembly (Slice 4, working)
 - `devkit fork create/list/inspect/delete/apply` — feature blueprint extraction and injection (Slice 5, working)
-- `devkit eval start/stop/status/report/learn/verify/versions` — token optimization via Headroom proxy (Slice 6, working)
+- `devkit eval ablate/verify/bench/report/versions/start/stop/status/learn` — offline cache-aware ablation + fail-closed judge + judge benchmark; Headroom proxy wrappers
+- `devkit metrics` — PR throughput + AI cost per merged PR (gh + Claude Code transcripts)
+- `devkit handoff create/list/claim/heartbeat/note/check/release/done/recover/brief/show/stats` — multi-agent task ledger
 
 ## Development
 ```
-pip install -e ".[memory,graph,eval]"
+pip install -e ".[memory,graph,scan,dev]"
 python -m devkit.cli --help
+python -m pytest        # offline; tests set DEVKIT_HOME/CLAUDE_CONFIG_DIR to temp dirs
 ```
 
 ## Key files
@@ -62,8 +65,13 @@ python -m devkit.cli --help
 ### Slice 6 — Eval (token optimization)
 - `devkit/commands/eval_cmd.py` — eval_app: start/stop/status/report/learn/verify/versions subcommands
 - `devkit/core/eval/headroom_bridge.py` — HeadroomBridge: is_running, start (shutil.which), stop (PID file kill), get_stats, get_session_calls, compute_session_savings, setup_instructions; PID_FILE + _read_pid_file() helpers
-- `devkit/core/eval/ablation.py` — AblationWorker: async background ablation; samples 20% of requests >= 2000 tokens; Jaccard-distance threshold 0.15; saves candidates to ~/.devkit/eval/suggestions/
-- `devkit/core/eval/judge.py` — ClaudeJudge: order-swap bias mitigation; SAFE only when both orderings agree; uses Haiku with x-headroom-bypass header
+- `devkit/core/eval/ablation.py` — offline AblationRunner: load_request (request JSON or transcript JSONL), segment (skips cached prefix + final task), ablate (placeholder, keeps tool pairing), replay keeps system/tools and strips thinking; Jaccard vs measured noise baseline is only a prefilter
+- `devkit/core/eval/bench.py` — judge benchmark over `devkit/data/judge_bench.jsonl` (false-SAFE rate is the key metric)
+- `devkit/core/context/injector.py` — hook pipeline: pinned items + RRF(hybrid search, recency, type) + per-fact packing
+- `devkit/core/metrics/throughput.py` — transcript usage parsing (dedupe by message id), price table, branch->PR attribution
+- `devkit/core/handoff/ledger.py` — SQLite ledger (BEGIN IMMEDIATE claims, leases, events), git worktree/merge-tree helpers
+- `devkit/paths.py` — all state paths; DEVKIT_HOME / CLAUDE_CONFIG_DIR overrides
+- `devkit/core/eval/judge.py` — ClaudeJudge: json_schema verdicts, N samples x 2 orderings, fails CLOSED (errors -> INCONCLUSIVE), uses config fast_model with x-headroom-bypass header
 - `devkit/core/eval/versions.py` — save_version (requires [memory]); list_versions (raw sqlite3, no [memory] needed)
 
 ### Slice 4 — Context assembly
@@ -81,7 +89,8 @@ python -m devkit.cli --help
 - `blueprints/<name>/blueprint.json` — blueprint metadata: seed_query, seed_nodes, external_dependencies, memory_facts, stack_context, transfer_notes, node_count, edge_count, token_estimate
 - `blueprints/<name>/subgraph.json` — extracted nodes/edges (same schema as knowledge-graph.json, scoped to feature)
 - `eval/headroom.pid` — JSON `{"pid": N, "port": N}`; written by `devkit eval start`, deleted by `devkit eval stop`
-- `eval/suggestions/candidate-<id>.json` — ablation candidates: chunk_preview, tokens_saved, original_output, reduced_output, verified, verdict
+- `eval/suggestions/candidate-<id>.json` — ablation candidates: location, chunk_preview, tokens_saved, task, original_output, reduced_output, jaccard_distance, baseline_distance, verdict
+- `handoff/ledger.db` — tasks, criteria, deps, events, commits
 
 ## Rules
 - Fork has no runtime dep on `[memory]` — memory facts fetched via raw sqlite3 (same pattern as `_recount_facts`); fork must work even if [memory] extra is not installed
@@ -98,7 +107,9 @@ python -m devkit.cli --help
 - `context inject` collects all facts into one content string before calling `add_item` once — renders a single `[SNAPSHOT] project / session-snapshot` header, not one per fact
 - `context list` summary line uses `|` not `·` — the middle-dot is non-ASCII and crashes cp1252
 - Always run /plan before writing any code; show file list and wait for approval
-- Never modify `~/.devkit/` schema without migrating existing data
+- Never modify `~/.devkit/` schema without migrating existing data (see `SQLiteBackend._migrate`: additive, idempotent ALTERs)
+- Never resolve a blueprint path except via `blueprint_dir(name)` (path traversal guard)
+- A scan with failed analysis must stay `incomplete=True` and display INCOMPLETE; never grade a partial scan as clean
 - All Claude API calls must use `cache_control: ephemeral` on stable system prompts
 - Semgrep subprocess must have timeout (default 120s); exit code 1 = findings, not error
 - Config keys are always stored lowercase; normalize with `.lower()` at command boundary
@@ -106,7 +117,7 @@ python -m devkit.cli --help
 - FTS5 keyword search uses OR terms (`"word1" OR "word2"`), not AND — avoids zero results on multi-word queries
 - Contradiction threshold is 0.85 cosine similarity; tunable via `CONTRADICTION_THRESHOLD` in sqlite_backend.py
 - MemoryStore ABC is the v1/v2 stability contract — CLI and scan commands must only call methods on the interface
-- `auto_learn` is OFF by default — enable with `devkit config set auto_learn true`; critical/high findings auto-stored, medium/low prompt user
+- `auto_learn` is OFF by default — enable with `devkit config set auto_learn true` (config values are coerced to the default's type); memory enrichment runs BEFORE storing new findings; facts stored under the project name
 - Scanner has no runtime dep on `[memory]` — `TYPE_CHECKING` guard in orchestrator.py; `_get_memory_store()` in scan.py catches `(ImportError, RuntimeError)` and returns None
 - `_enrich_with_memory()` threshold is 0.020 RRF score (≈ rank-1 semantic result); spec's "0.80 cosine" doesn't map to RRF values
 - Pass a pre-warmed `Embedder` instance to `SQLiteBackend(db_path, embedder=...)` so the download spinner fires before the scan, not mid-scan
@@ -118,8 +129,8 @@ python -m devkit.cli --help
 - Stop mechanism is PID file kill only — Headroom has no HTTP shutdown endpoint; Windows uses `taskkill /F /PID <pid>`, non-Windows uses `os.kill(pid, SIGTERM)`
 - Headroom bypass header is `x-headroom-bypass: true` (NOT `X-Headroom-Skip`) — used in ablation.py and judge.py `extra_headers`
 - proxy.log JSONL field names: `input_tokens_original`, `input_tokens_optimized`, `tokens_saved` — NOT `input_tokens` or `compressed_tokens` as originally specced
-- `ClaudeJudge` requires both orderings to agree before returning SAFE — run1 safe = winner in ("B","tie"), run2 safe = winner in ("A","tie"); either disagreement → INCONCLUSIVE
-- Ablation is async background only — `AblationWorker.run()` must be started in an event loop; `enqueue()` is the only entry point from request handlers
+- `ClaudeJudge` returns SAFE only if every run (all samples, both orderings) judges the reduced output non-inferior AND no run lists information_lost; any judge error → INCONCLUSIVE, never SAFE
+- Ablation is an explicit offline command (`devkit eval ablate`), never on the request path; never ablate content at/before the last cache breakpoint; always offer `--dry-run` first
 - `devkit eval versions` stores facts with `fact_type="pattern"`, `workstream="eval"`, content prefix `[PROMPT VERSION] ` — filter applied in raw SQL
 
 ## Windows Gotchas (Python 3.11, cp1252 terminal)

@@ -1,5 +1,5 @@
 ---
-name: devkit:context
+name: context
 description: Discover and assemble context from knowledge graphs, memory snapshots, workstreams, and blueprints. Sub-commands: list, add, build, budget, clear, refresh, register.
 argument-hint: ["list [--project name] [--type graph|snapshot|workstream|blueprint]", "add <item-id>", "build [--token-cap 8000]", "budget", "clear", "refresh"]
 allowed-tools: Bash(python -m devkit.cli context *)
@@ -20,4 +20,5 @@ Discover available context and inject it into the session.
 
 1. Parse the sub-command from `$ARGUMENTS`
 2. Run: `python -m devkit.cli context $ARGUMENTS`
-3. For `add` and `build`: display the injected context so user can confirm it
+3. For `add` and `build`: display the context so the user can confirm it. Selected items stay pinned
+   and are included by the SessionStart hook (`context inject`) until `context clear`.

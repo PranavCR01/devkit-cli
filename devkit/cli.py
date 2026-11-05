@@ -16,6 +16,24 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+
+def _version_callback(value: bool) -> None:
+    if value:
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            typer.echo(f"devkit {version('devkit-cli')}")
+        except PackageNotFoundError:
+            typer.echo("devkit (not installed as a package)")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(False, "--version", callback=_version_callback, is_eager=True,
+                                 help="Show the version and exit."),
+) -> None:
+    """DevKit CLI."""
+
 app.add_typer(config_app, name="config")
 app.add_typer(memory_app, name="memory")
 app.add_typer(context_app, name="context")
