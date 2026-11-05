@@ -31,10 +31,10 @@ these labels.
 | `flip_condition` | a comparison or boolean is inverted | 7 |
 | `wrong_tool_arg` | the right tool with a wrong argument | 7 |
 | `drop_tool_call` | a required tool call is removed | 7 |
-| `off_by_one` | a range, slice, or count moves by one | 6 |
+| `off_by_one` | a range, slice, or count moves by one | 7 |
 | `swap_path` | a file, route, key prefix, or field name is wrong | 6 |
 | `invent_api` | a real call is replaced with one that doesn't exist | 6 |
-| `drop_constraint` | a stated requirement disappears from a step | 5 |
+| `drop_constraint` | a stated requirement disappears from a step | 4 |
 
 **Equivalent cases (60).** Meaning-preserving transforms:
 

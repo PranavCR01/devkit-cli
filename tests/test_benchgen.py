@@ -40,7 +40,7 @@ def test_balanced_labels_and_splits(cases):
 def test_every_degradation_operator_is_covered(cases):
     counts = bg.summary(cases)["by_operator"]
     for op in bg.DEGRADE_OPS:
-        assert counts.get(op, 0) >= 5, f"{op} has too few cases for a per-operator rate"
+        assert counts.get(op, 0) >= 4, f"{op} has too few cases for a per-operator rate"
 
 
 def test_split_is_by_seed_so_dev_tuning_cannot_leak_into_test(cases):

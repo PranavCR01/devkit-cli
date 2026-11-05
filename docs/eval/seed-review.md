@@ -137,11 +137,11 @@ Why: Reusing the key lets the receiver drop duplicates when an attempt succeeded
   Why: Reusing the key lets the receiver drop duplicates when an attempt succeeded but its response was lost.
   ```
 
-- **degraded / drop_constraint**: the task requires the same key on every attempt
+- **degraded / off_by_one**: 4 attempts; the task caps it at 3
 
   ```
-  1. Generate `key = uuid4().hex`
-  2. Loop `for attempt in range(3)` and send with the header `Idempotency-Key: key`
+  1. Generate `key = uuid4().hex` once, before the loop, so all attempts share it
+  2. Loop `for attempt in range(4)` and send with the header `Idempotency-Key: key`
   3. On a 5xx or timeout, sleep `2 ** attempt` seconds and retry
   4. Return on the first 2xx; after the third failure, raise the last error
   
@@ -708,22 +708,22 @@ Why: Browsers reject credentialed requests when the allowed origin is a wildcard
 Why: setex stores the value and its expiry in one atomic command.
 ```
 
-- **degraded / swap_path**: keys are written with the products: prefix, so nothing is invalidated
-
-  ```
-  1. Build the cache key as `products:` + the full query string
-  2. Store responses with `redis.setex(key, 300, body)`
-  3. In `update_product`, delete the keys matching `product:*`
-  
-  Why: setex stores the value and its expiry in one atomic command.
-  ```
-
 - **degraded / drop_constraint**: different queries would collide on one key
 
   ```
   1. Build the cache key as `products:`
   2. Store responses with `redis.setex(key, 300, body)`
   3. In `update_product`, delete the keys matching `products:*`
+  
+  Why: setex stores the value and its expiry in one atomic command.
+  ```
+
+- **degraded / swap_path**: keys are written with the products: prefix, so nothing is invalidated
+
+  ```
+  1. Build the cache key as `products:` + the full query string
+  2. Store responses with `redis.setex(key, 300, body)`
+  3. In `update_product`, delete the keys matching `product:*`
   
   Why: setex stores the value and its expiry in one atomic command.
   ```
@@ -958,18 +958,18 @@ Why: Resolving first collapses `..` and symlinks, so the check sees the real pat
 2. Match with `re.fullmatch` on the stripped input
 ```
 
-- **degraded / off_by_one**: a ZIP code has 5 digits, not 6
-
-  ```
-  1. Use the pattern `^\d{6}(-\d{4})?$`
-  2. Match with `re.fullmatch` on the stripped input
-  ```
-
 - **degraded / drop_constraint**: whitespace around a valid ZIP would make it fail
 
   ```
   1. Use the pattern `^\d{5}(-\d{4})?$`
   2. Match with `re.fullmatch`
+  ```
+
+- **degraded / off_by_one**: a ZIP code has 5 digits, not 6
+
+  ```
+  1. Use the pattern `^\d{6}(-\d{4})?$`
+  2. Match with `re.fullmatch` on the stripped input
   ```
 
 - **equivalent / add_preamble**
@@ -1393,20 +1393,20 @@ Why: Negating spend sorts it descending while ties stay ascending by date.
 3. `break` as soon as `value is not None`
 ```
 
-- **degraded / off_by_one**: only 4 attempts
-
-  ```
-  1. Loop `for attempt in range(1, 5)`
-  2. Read with `value = sensor.read()`
-  3. `break` as soon as `value is not None`
-  ```
-
 - **degraded / flip_condition**: stops on a failed reading
 
   ```
   1. Loop `for attempt in range(1, 6)`
   2. Read with `value = sensor.read()`
   3. `break` as soon as `value is None`
+  ```
+
+- **degraded / off_by_one**: only 4 attempts
+
+  ```
+  1. Loop `for attempt in range(1, 5)`
+  2. Read with `value = sensor.read()`
+  3. `break` as soon as `value is not None`
   ```
 
 - **equivalent / reformat**
