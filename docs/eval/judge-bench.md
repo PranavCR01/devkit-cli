@@ -101,7 +101,44 @@ The 3 false SAFEs, reviewed one by one:
 
 ### v2.1, corrected label (2026-11-05)
 
-<!-- v2.1 results are written here from the saved report -->
+| Metric | Across 3 runs |
+|---|---|
+| **False SAFE** | **1/30, 0/30, 1/30** (0-3.3%; 95% CI 0.6-16.7% on the worst run) |
+| Accuracy | 95.0-96.7% |
+| False reject | 3.3-6.7% |
+| Inconclusive | 5.0-8.3% |
+| Order agreement | 95.0-98.3% |
+| Paraphrase false rejects | 0, 1, 0 of 7 |
+
+**The one remaining blind spot: `s13-d-change_constant`, missed in 2 of 3
+runs (3 of 6 counting v2.0).** The task restricts CORS to
+`https://app.acme.com` with credentials; the degraded answer allows `"*"`. The
+judge's reasoning names the different origin and still returns SAFE. No other
+degraded operator was ever judged SAFE in any v2.1 run. The judge prompt has
+not been tuned to fix this, because `s13` is a test-split case and tuning on
+it would invalidate the benchmark. The fix belongs on the `dev` split, with
+more wrong-value cases, and must then be re-measured here.
+
+**False rejects** (equivalent answers not judged SAFE, which costs savings,
+not safety):
+
+- an added preamble, rejected 3 times;
+- a dropped "Why:" line, rejected once (the judge treats the rationale as
+  information);
+- a paraphrase, rejected once.
+
+`s11` drew "lost information" flags on its equivalents because neither answer
+excludes test files *inside* `src/`. That may mean the reference answer itself
+is incomplete, so it is flagged for seed review.
+
+**Per operator:** every degraded operator except `change_constant` had 0
+misses in all 3 runs. With 1-5 cases per operator in the test half, the
+intervals are wide (43-79% upper bounds). Read them as "no obvious blind spot
+yet", not as precise rates.
+
+Raw report: `devkit eval bench --split test --runs 3 --output json` (each run
+also saves a full report with per-case reasoning under
+`~/.devkit/eval/bench/`).
 
 ## Limits, and the questions to expect
 
