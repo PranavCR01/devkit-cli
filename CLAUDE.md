@@ -66,7 +66,8 @@ python -m pytest        # offline; tests set DEVKIT_HOME/CLAUDE_CONFIG_DIR to te
 - `devkit/commands/eval_cmd.py` — eval_app: start/stop/status/report/learn/verify/versions subcommands
 - `devkit/core/eval/headroom_bridge.py` — HeadroomBridge: is_running, start (shutil.which), stop (PID file kill), get_stats, get_session_calls, compute_session_savings, setup_instructions; PID_FILE + _read_pid_file() helpers
 - `devkit/core/eval/ablation.py` — offline AblationRunner: load_request (request JSON or transcript JSONL), segment (skips cached prefix + final task), ablate (placeholder, keeps tool pairing), replay keeps system/tools and strips thinking; Jaccard vs measured noise baseline is only a prefilter
-- `devkit/core/eval/bench.py` — judge benchmark over `devkit/data/judge_bench.jsonl` (false-SAFE rate is the key metric)
+- `devkit/core/eval/bench.py` — judge benchmark (default `judge_bench_v2.jsonl`, `--smoke` = old 14 cases): multi-run, per-operator, Wilson CIs on the worst run; false-SAFE rate is the key metric
+- `devkit/core/eval/benchgen.py` — builds `judge_bench_v2.jsonl` + `docs/eval/seed-review.md` from `devkit/data/bench/seeds.jsonl`; degraded labels by construction
 - `devkit/core/context/injector.py` — hook pipeline: pinned items + RRF(hybrid search, recency, type) + per-fact packing
 - `devkit/core/metrics/throughput.py` — transcript usage parsing (dedupe by message id), price table, branch->PR attribution
 - `devkit/core/handoff/ledger.py` — SQLite ledger (BEGIN IMMEDIATE claims, leases, events), git worktree/merge-tree helpers
@@ -131,6 +132,8 @@ python -m pytest        # offline; tests set DEVKIT_HOME/CLAUDE_CONFIG_DIR to te
 - proxy.log JSONL field names: `input_tokens_original`, `input_tokens_optimized`, `tokens_saved` — NOT `input_tokens` or `compressed_tokens` as originally specced
 - `ClaudeJudge` returns SAFE only if every run (all samples, both orderings) judges the reduced output non-inferior AND no run lists information_lost; any judge error → INCONCLUSIVE, never SAFE
 - Ablation is an explicit offline command (`devkit eval ablate`), never on the request path; never ablate content at/before the last cache breakpoint; always offer `--dry-run` first
+- Never hand-edit `judge_bench_v2.jsonl` or `docs/eval/seed-review.md`: edit `devkit/data/bench/seeds.jsonl` and run `devkit eval bench-build` (tests fail if they drift). Every mutation needs a `why`; equivalent variants must keep all substance markers
+- Report judge results on `--split test`; tune only on `dev`
 - `devkit eval versions` stores facts with `fact_type="pattern"`, `workstream="eval"`, content prefix `[PROMPT VERSION] ` — filter applied in raw SQL
 
 ## Windows Gotchas (Python 3.11, cp1252 terminal)

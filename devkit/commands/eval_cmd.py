@@ -273,25 +273,30 @@ def ablate_cmd(
 
 @eval_app.command("bench")
 def bench_cmd(
-    dataset: Optional[Path] = typer.Argument(None, help="JSONL dataset (default: bundled judge_bench.jsonl)."),
+    dataset: Optional[Path] = typer.Argument(None, help="JSONL dataset (default: judge_bench_v2.jsonl)."),
+    split: str = typer.Option("test", "--split", help="test | dev | all (seed-level split; tune on dev only)."),
+    runs: int = typer.Option(3, "--runs", help="Repeat the whole benchmark N times; ranges are reported."),
     samples: int = typer.Option(1, "--samples", help="Judge samples per ordering."),
     model: Optional[str] = typer.Option(None, "--model", help="Judge model (default: fast_model)."),
+    smoke: bool = typer.Option(False, "--smoke", help="Use the 14-case hand-written smoke set instead."),
     output: str = typer.Option("text", "--output", help="text | json"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate the dataset and print the call budget."),
 ) -> None:
-    """Benchmark the judge on labeled cases: accuracy, false-SAFE rate, order agreement."""
-    from devkit.core.eval.bench import DEFAULT_DATASET, load_dataset, run_bench, save_report
+    """Benchmark the judge: false-SAFE rate with 95% CIs, per operator, across runs."""
+    from devkit.core.eval.bench import (DEFAULT_DATASET, SMOKE_DATASET, aggregate, load_dataset,
+                                        run_bench, save_report)
 
-    path = dataset or DEFAULT_DATASET
+    path = dataset or (SMOKE_DATASET if smoke else DEFAULT_DATASET)
     try:
-        cases = load_dataset(path)
+        cases = load_dataset(path, None if smoke and split == "test" else split)
     except (ValueError, json.JSONDecodeError, OSError) as exc:
         typer.echo(f"[ERROR] {exc}")
         raise typer.Exit(1)
     n_eq = sum(c["label"] == "equivalent" for c in cases)
+    calls = len(cases) * 2 * samples * runs
     if dry_run:
-        typer.echo(f"{len(cases)} cases ({n_eq} equivalent, {len(cases) - n_eq} degraded); "
-                   f"{len(cases) * 2 * samples} judge calls.")
+        typer.echo(f"{len(cases)} cases ({n_eq} equivalent, {len(cases) - n_eq} degraded), "
+                   f"{runs} run(s): {calls} judge calls.")
         return
     key = _api_key()
     if not key:
@@ -299,21 +304,73 @@ def bench_cmd(
         raise typer.Exit(1)
     from devkit.core.eval.judge import ClaudeJudge
     judge = ClaudeJudge(api_key=key, model=model, samples=samples)
-    rep = run_bench(judge, cases)
-    saved = save_report(rep, judge.model, samples, str(path))
+    reports = []
+    for r in range(runs):
+        if output != "json":
+            typer.echo(f"run {r + 1}/{runs}: {len(cases)} cases...")
+        reports.append(run_bench(judge, cases))
+    agg = aggregate(reports)
+    saved = save_report({"aggregate": agg, "runs": [rep.to_dict() for rep in reports]},
+                        judge.model, samples, str(path))
     if output == "json":
-        typer.echo(json.dumps(rep.to_dict(), indent=2))
+        typer.echo(json.dumps(agg, indent=2))
         return
-    table = Table(title=f"Judge benchmark ({judge.model}, samples={samples})", box=rich.box.ASCII)
+
+    def rng(k: str) -> str:
+        lo, hi = agg["ranges"][k]
+        return f"{lo:.1%}" if lo == hi else f"{lo:.1%} - {hi:.1%}"
+
+    lo, hi = agg["false_safe_ci95_worst_run"]
+    table = Table(title=f"Judge benchmark: {judge.model}, {len(cases)} cases x {runs} runs",
+                  box=rich.box.ASCII)
     table.add_column("Metric")
     table.add_column("Value")
-    for k, v in rep.summary().items():
-        table.add_row(k, str(v))
+    table.add_row("false SAFE (degraded judged safe)",
+                  f"{rng('false_safe_rate')}  (95% CI {lo:.1%}-{hi:.1%}, worst run)")
+    table.add_row("accuracy", rng("accuracy"))
+    table.add_row("false reject (equivalent not SAFE)", rng("false_reject_rate"))
+    table.add_row("inconclusive", rng("inconclusive_rate"))
+    table.add_row("order agreement", rng("order_agreement_rate"))
+    table.add_row("paraphrase false rejects", f"{agg['llm_paraphrase_false_reject']} of {agg['llm_paraphrase_n']}")
     _console.print(table)
-    for row in rep.rows:
-        if not row["correct"]:
-            typer.echo(f"  MISS {row['id']:<22} label={row['label']:<10} verdict={row['verdict']}")
+
+    ops = Table(title="By operator (errors per run; CI on worst run)", box=rich.box.ASCII)
+    for col in ("Label", "Operator", "n", "Errors", "95% CI"):
+        ops.add_column(col)
+    for row in agg["by_operator"]:
+        a, b = row["ci95_worst_run"]
+        ops.add_row(row["label"], row["operator"], str(row["n"]),
+                    "/".join(str(e) for e in row["errors_per_run"]), f"{a:.0%}-{b:.0%}")
+    _console.print(ops)
     typer.echo(f"Saved: {saved}")
+
+
+@eval_app.command("bench-build")
+def bench_build_cmd(
+    check: bool = typer.Option(False, "--check", help="Fail if the committed dataset is out of date."),
+) -> None:
+    """Regenerate judge_bench_v2.jsonl from the annotated seeds (deterministic)."""
+    from devkit.core.eval import benchgen
+
+    try:
+        cases = benchgen.build(benchgen.load_seeds())
+    except benchgen.SeedError as exc:
+        typer.echo(f"[ERROR] invalid seed: {exc}")
+        raise typer.Exit(1)
+    seeds = benchgen.load_seeds()
+    rendered = "".join(json.dumps(c, ensure_ascii=False, sort_keys=True) + "\n" for c in cases)
+    review = benchgen.review_markdown(seeds, cases)
+    current = benchgen.DATASET_PATH.read_text(encoding="utf-8") if benchgen.DATASET_PATH.exists() else ""
+    if check:
+        if rendered != current:
+            typer.echo("[!] judge_bench_v2.jsonl is out of date: run devkit eval bench-build")
+            raise typer.Exit(1)
+        typer.echo("[OK] dataset matches seeds")
+        return
+    benchgen.write_dataset(cases)
+    if benchgen.REVIEW_PATH.parent.exists():
+        benchgen.REVIEW_PATH.write_text(review, encoding="utf-8")
+    typer.echo(json.dumps(benchgen.summary(cases)))
 
 
 @eval_app.command("verify")
