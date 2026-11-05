@@ -1,13 +1,15 @@
 {
+  "hooks": {
     "SessionStart": [
-        {
-            "matcher": "",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "python -m devkit.cli memory snapshot --format hook --project \"$(basename $(git rev-parse --show-toplevel 2>/dev/null || pwd))\" 2>/dev/null || true"
-                }
-            ]
-        }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "devkit context inject --format hook 2>/dev/null || true",
+            "timeout": 30
+          }
+        ]
+      }
     ]
+  }
 }

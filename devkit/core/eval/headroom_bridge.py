@@ -14,7 +14,7 @@ HEADROOM_PORT = 8787
 HEADROOM_LOG = Path.home() / ".headroom" / "logs" / "proxy.log"
 PROXY_SAVINGS_FILE = Path.home() / ".headroom" / "proxy_savings.json"
 SKIP_HEADER = "x-headroom-bypass"
-PID_FILE = Path.home() / ".devkit" / "eval" / "headroom.pid"
+from devkit.paths import PID_FILE
 
 
 def _read_pid_file() -> tuple[int, int] | None:

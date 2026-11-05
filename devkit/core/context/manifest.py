@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-MANIFEST_PATH = Path.home() / ".devkit" / "manifest.json"
+from devkit.paths import MANIFEST_PATH, MEMORY_DB
 
 
 class Manifest:
@@ -78,15 +78,15 @@ class Manifest:
     def _recount_facts(self, data: dict) -> None:
         """Recount valid facts per project directly from memory.db via raw sqlite3."""
         import sqlite3
-        memory_db = Path.home() / ".devkit" / "memory.db"
+        memory_db = MEMORY_DB
         if not memory_db.exists():
             return
         try:
-            conn = sqlite3.connect(str(memory_db))
-            rows = conn.execute(
-                "SELECT project, COUNT(*) FROM facts WHERE invalid_at IS NULL GROUP BY project"
-            ).fetchall()
-            conn.close()
+            from contextlib import closing
+            with closing(sqlite3.connect(str(memory_db))) as conn:
+                rows = conn.execute(
+                    "SELECT project, COUNT(*) FROM facts WHERE invalid_at IS NULL GROUP BY project"
+                ).fetchall()
         except Exception:
             return
 

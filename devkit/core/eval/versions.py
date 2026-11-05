@@ -1,8 +1,9 @@
 from __future__ import annotations
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
-MEMORY_DB = Path.home() / ".devkit" / "memory.db"
+from devkit.paths import MEMORY_DB
 _PREFIX = "[PROMPT VERSION] "
 
 
@@ -14,13 +15,14 @@ def save_version(content: str, project: str) -> str | None:
     try:
         from devkit.core.memory.sqlite_backend import MEMORY_DB as MDB, SQLiteBackend
         backend = SQLiteBackend(MDB)
-        return backend.save(
+        fact = backend.save(
             content=f"{_PREFIX}{content}",
             fact_type="pattern",
             project=project,
             workstream="eval",
             source="devkit-eval",
         )
+        return fact.id
     except Exception:
         return None
 
@@ -30,23 +32,22 @@ def list_versions(project: str | None = None, limit: int = 20) -> list[dict]:
     if not MEMORY_DB.exists():
         return []
     try:
-        conn = sqlite3.connect(str(MEMORY_DB))
-        conn.row_factory = sqlite3.Row
-        if project:
-            rows = conn.execute(
-                "SELECT id, project, content, created_at FROM facts "
-                "WHERE content LIKE ? AND project = ? AND invalid_at IS NULL "
-                "ORDER BY created_at DESC LIMIT ?",
-                (f"{_PREFIX}%", project, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, project, content, created_at FROM facts "
-                "WHERE content LIKE ? AND invalid_at IS NULL "
-                "ORDER BY created_at DESC LIMIT ?",
-                (f"{_PREFIX}%", limit),
-            ).fetchall()
-        conn.close()
+        with closing(sqlite3.connect(str(MEMORY_DB))) as conn:
+            conn.row_factory = sqlite3.Row
+            if project:
+                rows = conn.execute(
+                    "SELECT id, project, content, created_at FROM facts "
+                    "WHERE content LIKE ? AND project = ? AND invalid_at IS NULL "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (f"{_PREFIX}%", project, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, project, content, created_at FROM facts "
+                    "WHERE content LIKE ? AND invalid_at IS NULL "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (f"{_PREFIX}%", limit),
+                ).fetchall()
         return [
             {
                 "id": r["id"],

@@ -36,7 +36,11 @@ IMPORTANT — Many apps use Supabase directly from the frontend with no separate
 - Relying on frontend routing (/admin, /dashboard) as an access control mechanism
 - Storage bucket access with no RLS policies
 
-Respond ONLY with valid JSON in this exact format — no markdown, no explanation:
+Input format: each file starts with a "# --- FILE: <path> ---" header and every code line is
+prefixed with its line number as "N| ". Report file_path exactly as written in the header and
+line_start as that N. Only report issues you can point to in the code shown.
+
+Respond ONLY with valid JSON in this exact format - no markdown, no explanation:
 {
   "findings": [
     {
@@ -46,7 +50,7 @@ Respond ONLY with valid JSON in this exact format — no markdown, no explanatio
       "plain_english_desc": "What this means for the app in 1-2 plain sentences",
       "business_impact": "What could happen if this is exploited",
       "fix_snippet": "The corrected code snippet",
-      "file_path": "relative/path/to/file",
+      "file_path": "path exactly as in the FILE header",
       "line_start": 42,
       "owasp_ref": "A01:2025" | null,
       "cwe_ref": "CWE-89" | null
@@ -60,7 +64,7 @@ Given a security finding, explain it in an educational way.
 Respond ONLY with valid JSON:
 {
   "why_it_happens": "Why AI tools generate this pattern (2-3 sentences)",
-  "real_world_example": "A real breach caused by this vulnerability with company name and year",
+  "real_world_example": "A publicly documented incident of this class ONLY if you are certain it is real; otherwise the string 'No verified example'",
   "learn_more_links": ["https://owasp.org/..."]
 }"""
 

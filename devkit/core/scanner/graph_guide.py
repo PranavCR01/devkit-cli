@@ -11,6 +11,7 @@ class GraphGuide:
     """
 
     def __init__(self, project_path: str) -> None:
+        self.root = project_path
         graph_path = Path(project_path) / ".understand-anything" / "knowledge-graph.json"
         self.graph: dict | None = None
         self.available = False
@@ -66,10 +67,12 @@ class GraphGuide:
         if not self.available or self.graph is None:
             return []
 
+        from .classifier import normalize_rel, to_project_relative
+        target = to_project_relative(file_path, self.root)
         start_ids = [
             node["id"]
             for node in self.graph["nodes"]
-            if node.get("filePath") == file_path
+            if node.get("filePath") and normalize_rel(node["filePath"]) == target
         ]
 
         visited: set[str] = set()
@@ -87,7 +90,7 @@ class GraphGuide:
         for node_id in visited:
             if node := self.node_by_id.get(node_id):
                 if fp := node.get("filePath"):
-                    if fp != file_path:
+                    if normalize_rel(fp) != target:
                         blast.append(fp)
 
         return list(set(blast))

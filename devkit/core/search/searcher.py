@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from devkit.core.memory.sqlite_backend import MEMORY_DB, SQLiteBackend
@@ -9,17 +8,8 @@ from devkit.core.memory.store import FactType, SearchResult
 
 def detect_project(cwd: Path | None = None) -> str:
     """Detect current project name from git root; fall back to cwd name."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True,
-            cwd=str(cwd or Path.cwd()),
-        )
-        if result.returncode == 0:
-            return Path(result.stdout.strip()).name
-    except (OSError, FileNotFoundError):
-        pass
-    return (cwd or Path.cwd()).name
+    from devkit.core.context.injector import detect_project as _detect
+    return _detect(cwd)
 
 
 def get_backend(db_path: Path = MEMORY_DB) -> SQLiteBackend:

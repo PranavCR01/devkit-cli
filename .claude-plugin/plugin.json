@@ -1,4 +1,7 @@
 {
-    "name": "devkit",
-    "source": "https://github.com/PranavCR01/devkit-cli"
+  "name": "devkit",
+  "version": "0.2.0",
+  "description": "Developer context, security scanning, memory, token optimization, and agent handoff for Claude Code",
+  "author": { "name": "PranavCR01" },
+  "repository": "https://github.com/PranavCR01/devkit-cli"
 }

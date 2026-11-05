@@ -9,7 +9,6 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from devkit.core.memory.sqlite_backend import MEMORY_DB, SQLiteBackend
 
 memory_app = typer.Typer(
     name="memory",
@@ -28,20 +27,21 @@ def _detect_project() -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, cwd=str(Path.cwd()),
+            capture_output=True, text=True, cwd=str(Path.cwd()), timeout=5,
         )
         if result.returncode == 0:
             return Path(result.stdout.strip()).name
-    except (OSError, FileNotFoundError):
+    except (OSError, subprocess.SubprocessError):
         pass
     return Path.cwd().name
 
 
-def _get_backend() -> SQLiteBackend:
+def _get_backend():
     try:
+        from devkit.core.memory.sqlite_backend import MEMORY_DB, SQLiteBackend
         return SQLiteBackend(MEMORY_DB)
-    except RuntimeError as exc:
-        typer.echo(f"[!] {exc}")
+    except (ImportError, RuntimeError) as exc:
+        typer.echo(f"[!] {exc} -- run: pip install -e '.[memory]'")
         raise typer.Exit(code=1)
 
 
@@ -65,6 +65,9 @@ def memory_save(
 
     proj = project or _detect_project()
     backend = _get_backend()
+    if workstream is None:
+        active = backend.active_workstream(proj)
+        workstream = active if active and active != "main" else None
     fact = backend.save(
         content=content, fact_type=fact_type, project=proj,
         workstream=workstream, source=source,
@@ -159,25 +162,59 @@ def memory_contradict(
 def memory_switch(
     name: str = typer.Argument(..., help="Workstream name to switch to"),
     project: Optional[str] = typer.Option(None, "--project", "-p"),
+    note: Optional[str] = typer.Option(None, "--note", "-n",
+                                       help="Where you left the CURRENT workstream (saved for later)"),
 ) -> None:
-    """Save current context and load a named workstream."""
+    """Save the current workstream's state and activate another one.
+
+    Saved state: your note, git branch, and the workstream's recent fact ids.
+    New facts are tagged with the active workstream automatically.
+    """
+    from datetime import datetime, timezone
+
     proj = project or _detect_project()
     backend = _get_backend()
+    current = backend.active_workstream(proj) or "main"
+
+    if current != name:
+        prev_state = backend.load_workstream(current, proj) or {}
+        recent = backend.list_facts(project=proj, workstream=current if current != "main" else None,
+                                    limit=10)
+        backend.save_workstream(current, proj, {
+            **prev_state,
+            "note": note if note is not None else prev_state.get("note", ""),
+            "branch": _git_branch(),
+            "fact_ids": [f.id for f in recent],
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+        })
 
     existing = backend.load_workstream(name, proj)
-    backend.save_workstream("main", proj, {"switched_to": name})
+    backend.set_active_workstream(name, proj)
 
+    verb = "Switched to" if existing is not None else "Created and switched to"
+    typer.echo(f"[OK] {verb} workstream '{name}' (project: {proj}); saved '{current}'")
     if existing:
-        typer.echo(f"[OK] Switched to workstream '{name}' (project: {proj})")
-    else:
-        backend.save_workstream(name, proj, {})
-        typer.echo(f"[OK] Created and switched to workstream '{name}' (project: {proj})")
+        if existing.get("note"):
+            typer.echo(f"     last note: {existing['note']}")
+        if existing.get("branch"):
+            typer.echo(f"     branch then: {existing['branch']}")
+        n = len(backend.list_facts(project=proj, workstream=name, limit=500))
+        typer.echo(f"     {n} fact(s) tagged '{name}'")
 
     try:
         from devkit.core.context.manifest import Manifest
         Manifest().update_workstream(proj, name)
     except Exception:
         pass
+
+
+def _git_branch() -> str:
+    try:
+        out = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 @memory_app.command("workstreams")
@@ -195,7 +232,8 @@ def memory_workstreams(
 
     typer.echo(f"Workstreams for '{proj}':")
     for ws in wss:
-        typer.echo(f"  {ws['name']:<20} updated: {ws['updated_at'][:10]}")
+        mark = "*" if ws.get("active") else " "
+        typer.echo(f"{mark} {ws['name']:<20} updated: {ws['updated_at'][:10]}")
 
 
 @memory_app.command("snapshot")

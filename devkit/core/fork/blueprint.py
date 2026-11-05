@@ -1,8 +1,25 @@
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-BLUEPRINTS_DIR = Path.home() / ".devkit" / "blueprints"
+from devkit.paths import BLUEPRINTS_DIR
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def blueprint_dir(name: str) -> Path:
+    """Resolve a blueprint name to its directory, refusing anything that could
+    escape BLUEPRINTS_DIR (e.g. '..', '../x', absolute paths, separators)."""
+    if not isinstance(name, str) or not _NAME_RE.match(name) or ".." in name:
+        raise ValueError(
+            f"Invalid blueprint name {name!r}: use letters, digits, '.', '_' or '-' (max 64 chars)."
+        )
+    base = BLUEPRINTS_DIR.resolve()
+    target = (BLUEPRINTS_DIR / name).resolve()
+    if target.parent != base:
+        raise ValueError(f"Invalid blueprint name {name!r}")
+    return BLUEPRINTS_DIR / name
 
 
 class Blueprint:
@@ -17,12 +34,13 @@ class Blueprint:
         external_dependencies: list[str],
         memory_facts: list[dict],
         stack_context: dict,
+        seed_nodes: list[str] | None = None,
     ) -> Path:
         """Create a blueprint directory and save all components.
 
         Returns the path to the blueprint directory.
         """
-        bp_dir = BLUEPRINTS_DIR / name
+        bp_dir = blueprint_dir(name)
         bp_dir.mkdir(parents=True, exist_ok=True)
 
         subgraph = {"nodes": subgraph_nodes, "edges": subgraph_edges}
@@ -41,7 +59,8 @@ class Blueprint:
             "source_project": source_project,
             "extracted_at": datetime.now(timezone.utc).isoformat(),
             "seed_query": feature_name,
-            "seed_nodes": [n["id"] for n in subgraph_nodes[:5]],
+            "seed_nodes": list(seed_nodes) if seed_nodes is not None
+            else [n["id"] for n in subgraph_nodes[:5]],
             "external_dependencies": external_dependencies,
             "memory_facts": memory_facts,
             "stack_context": stack_context,
@@ -62,14 +81,14 @@ class Blueprint:
 
     @staticmethod
     def load(name: str) -> dict:
-        bp_dir = BLUEPRINTS_DIR / name
+        bp_dir = blueprint_dir(name)
         if not bp_dir.exists():
             raise ValueError(f"Blueprint '{name}' not found in {BLUEPRINTS_DIR}")
         return json.loads((bp_dir / "blueprint.json").read_text(encoding="utf-8"))
 
     @staticmethod
     def load_subgraph(name: str) -> dict:
-        bp_dir = BLUEPRINTS_DIR / name
+        bp_dir = blueprint_dir(name)
         return json.loads((bp_dir / "subgraph.json").read_text(encoding="utf-8"))
 
     @staticmethod

@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from devkit.core.memory.store import MemoryStore, SearchResult
 
-from .classifier import FileClassifier
+from devkit.config import DEFAULT_MODEL
+
+from .classifier import FileClassifier, to_project_relative
 from .claude_analyzer import ClaudeAnalyzer
 from .graph_guide import GraphGuide
 from .scorer import calculate_scores
@@ -48,6 +50,14 @@ class ScanResult:
     files_scanned: int
     lines_scanned: int
     graph_guided: bool
+    # True when part of the analysis failed (Claude chunks errored, semgrep
+    # missing/timed out). The grade then reflects only what was analyzed.
+    incomplete: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def display_grade(self) -> str:
+        return "INCOMPLETE" if self.incomplete else self.grade
 
 
 _SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -57,14 +67,28 @@ class ScanOrchestrator:
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-sonnet-4-6",
+        model: str = DEFAULT_MODEL,
         memory_store: "MemoryStore | None" = None,
         auto_learn: bool = False,
+        project_name: str | None = None,
+        semgrep_timeout: int = 120,
+        max_file_bytes: int | None = None,
+        tier2_line_cap: int = 8000,
+        max_concurrency: int = 4,
+        claude_client=None,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._memory_store = memory_store
         self._auto_learn = auto_learn
+        self._project_name = project_name
+        self._semgrep_timeout = semgrep_timeout
+        self._max_file_bytes = max_file_bytes
+        self._tier2_line_cap = tier2_line_cap
+        self._max_concurrency = max_concurrency
+        self._claude_client = claude_client
+        self._warnings: list[str] = []
+        self._incomplete = False
 
     async def run(
         self,
@@ -83,8 +107,10 @@ class ScanOrchestrator:
         graph = guide.graph if graph_guided else None
 
         # 2. Classify files
-        classifier = FileClassifier()
-        tier1_files, tier2_files = classifier.classify(path, graph=graph)
+        classifier = FileClassifier(max_file_bytes=self._max_file_bytes)
+        tier1_files, tier2_files = classifier.classify(
+            path, graph=graph, priority_paths=guide.get_tier1_files() if graph_guided else None,
+        )
 
         # 3. Parallel semgrep + Claude
         semgrep_raw, claude_raw = await asyncio.gather(
@@ -93,6 +119,9 @@ class ScanOrchestrator:
         )
 
         # 4. Merge (semgrep wins on structure, Claude enriches prose)
+        for raw in (*semgrep_raw, *claude_raw):
+            if raw.get("file_path"):
+                raw["file_path"] = to_project_relative(raw["file_path"], path)
         merged = self._merge(semgrep_raw, claude_raw)
 
         # 5. Score
@@ -118,12 +147,16 @@ class ScanOrchestrator:
             files_scanned=len(tier1_files) + len(tier2_files),
             lines_scanned=_count_lines(tier1_files + tier2_files),
             graph_guided=graph_guided,
+            incomplete=self._incomplete,
+            warnings=list(self._warnings),
         )
+
+        # Enrich BEFORE storing: otherwise every new finding matches itself
+        # and is reported as "seen before" on its very first scan.
+        result.findings = self._enrich_with_memory(result.findings)
 
         if self._auto_learn and self._memory_store:
             await self._store_findings_in_memory(result)
-
-        result.findings = self._enrich_with_memory(result.findings)
 
         return result
 
@@ -132,7 +165,12 @@ class ScanOrchestrator:
             return []
         runner = SemgrepRunner()
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, runner.run, path, mode)
+        try:
+            return await loop.run_in_executor(None, runner.run, path, mode, self._semgrep_timeout)
+        except RuntimeError as exc:
+            self._incomplete = True
+            self._warnings.append(f"Semgrep pass skipped: {exc}")
+            return []
 
     async def _run_claude(
         self,
@@ -143,8 +181,18 @@ class ScanOrchestrator:
     ) -> list[dict]:
         if not enabled:
             return []
-        analyzer = ClaudeAnalyzer(api_key=self._api_key, model=self._model)
-        return await analyzer.analyze(tier1_files, tier2_files, mode)
+        analyzer = ClaudeAnalyzer(
+            api_key=self._api_key, model=self._model, client=self._claude_client,
+            max_concurrency=self._max_concurrency, tier2_line_cap=self._tier2_line_cap,
+        )
+        findings = await analyzer.analyze(tier1_files, tier2_files, mode)
+        if analyzer.failed_chunks:
+            self._incomplete = True
+            self._warnings.append(
+                f"Claude analysis failed for {analyzer.failed_chunks}/{analyzer.total_chunks} "
+                f"chunk(s): {analyzer.errors[0]}"
+            )
+        return findings
 
     async def _store_findings_in_memory(self, result: ScanResult) -> None:
         """Store critical/high findings as vulnerability_pattern facts.
@@ -153,9 +201,12 @@ class ScanOrchestrator:
         Medium/low are handled interactively in scan.py.
         """
         seen_titles: set[str] = set()
+        project = self._project_name or Path(result.project_path).name
         for finding in result.findings:
             if finding.severity not in ("critical", "high"):
                 continue
+            if finding.memory_match is not None:
+                continue  # already known; don't store a duplicate
             if finding.title in seen_titles:
                 continue
             seen_titles.add(finding.title)
@@ -169,7 +220,7 @@ class ScanOrchestrator:
             self._memory_store.save(
                 content=content,
                 fact_type="vulnerability_pattern",
-                project=result.project_path,
+                project=project,
                 source="scan",
             )
 
@@ -193,15 +244,23 @@ class ScanOrchestrator:
 
     @staticmethod
     def _merge(semgrep_raw: list[dict], claude_raw: list[dict]) -> dict[str, dict]:
-        """Deduplicate on file_path:line_start. Semgrep wins; Claude enriches prose."""
+        """Deduplicate on file_path:line_start. Semgrep wins; Claude enriches prose.
+
+        Several semgrep rules on one line are all kept (keyed by rule id too);
+        a Claude finding on that line enriches the first of them.
+        """
         merged: dict[str, dict] = {}
 
         for f in claude_raw:
             key = f"{f.get('file_path', '')}:{f.get('line_start', 0)}"
+            if key in merged:
+                key += f":{len(merged)}"
             merged[key] = {**f, "source": "claude"}
 
         for f in semgrep_raw:
             key = f"{f.get('file_path', '')}:{f.get('line_start', 0)}"
+            if key in merged and merged[key].get("source") == "semgrep":
+                key += f":{f.get('title', '')}"
             if key in merged:
                 existing = merged[key]
                 merged[key] = {

@@ -4,27 +4,58 @@ from devkit.commands.config_cmd import config_app
 from devkit.commands.context_cmd import context_app
 from devkit.commands.eval_cmd import eval_app
 from devkit.commands.fork_cmd import fork_app
+from devkit.commands.handoff_cmd import handoff_app
 from devkit.commands.memory_cmd import memory_app
+from devkit.commands.metrics_cmd import metrics_cmd
 from devkit.commands.scan import scan
 from devkit.commands.search_cmd import search_cmd
 
 app = typer.Typer(
     name="devkit",
-    help="DevKit -- security scanning, memory, search, context, fork, and eval.",
+    help="DevKit -- security scanning, memory, search, context, fork, eval, metrics, and handoff.",
     no_args_is_help=True,
 )
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            typer.echo(f"devkit {version('devkit-cli')}")
+        except PackageNotFoundError:
+            typer.echo("devkit (not installed as a package)")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(False, "--version", callback=_version_callback, is_eager=True,
+                                 help="Show the version and exit."),
+) -> None:
+    """DevKit CLI."""
 
 app.add_typer(config_app, name="config")
 app.add_typer(memory_app, name="memory")
 app.add_typer(context_app, name="context")
 app.add_typer(fork_app, name="fork")
 app.add_typer(eval_app, name="eval")
+app.add_typer(handoff_app, name="handoff")
 app.command()(scan)
 app.command(name="search")(search_cmd)
+app.command(name="metrics")(metrics_cmd)
+
+
+HOOK_COMMAND = "devkit context inject --format hook 2>/dev/null || true"
 
 
 @app.command()
-def init() -> None:
+def init(
+    register_hook: bool = typer.Option(
+        False, "--register-hook",
+        help="Also register the SessionStart hook in ~/.claude/settings.json "
+             "(skip this if you installed DevKit as a Claude Code plugin).",
+    ),
+) -> None:
     """Initialize ~/.devkit/ directory structure."""
     from devkit.config import DEVKIT_DIR, Config
     from devkit.state import State
@@ -64,32 +95,56 @@ def init() -> None:
         pass
 
     _write_session_hook(DEVKIT_DIR / "hooks" / "session-start.sh")
+    if register_hook:
+        from devkit.paths import claude_home
+        changed = register_session_hook(claude_home() / "settings.json")
+        typer.echo("[OK] SessionStart hook registered in Claude Code settings"
+                   if changed else "[OK] SessionStart hook already registered")
+    else:
+        typer.echo("  To enable auto-injection: devkit init --register-hook  (or install the plugin)")
 
     typer.echo(f"[OK] Initialized {DEVKIT_DIR}")
     if created:
         typer.echo("  Run: devkit config set ANTHROPIC_API_KEY <your-key>")
 
 
-def _write_session_hook(hook_path: "typer.Path") -> None:  # type: ignore[name-defined]
+def _write_session_hook(hook_path) -> None:
+    """Shell wrapper for users who prefer to reference a script path in settings."""
     from pathlib import Path as _Path
 
     hook_path = _Path(str(hook_path))
-    content = (
+    hook_path.write_text(
         "#!/bin/bash\n"
-        "# DevKit session start hook -- injects context into Claude Code via SessionStart\n"
-        "PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)\n"
-        'PROJECT_NAME=$(basename "$PROJECT_ROOT")\n'
-        "\n"
-        'SNAPSHOT=$(python3 -m devkit.cli context inject --project "$PROJECT_NAME" --format hook 2>/dev/null)\n'
-        'if [ -n "$SNAPSHOT" ]; then\n'
-        '    echo "$SNAPSHOT"\n'
-        "fi\n"
+        "# DevKit SessionStart hook: prints pinned + retrieved context for this project.\n"
+        "# Claude Code passes the session JSON (incl. cwd) on stdin; inject reads it.\n"
+        f"{HOOK_COMMAND}\n",
+        encoding="utf-8",
     )
-    hook_path.write_text(content, encoding="utf-8")
-    typer.echo(f"[OK] Session hook written: {hook_path}")
-    typer.echo(
-        "  Register in ~/.claude/settings.json under hooks.SessionStart to enable injection."
-    )
+    typer.echo(f"[OK] Session hook script written: {hook_path}")
+
+
+def register_session_hook(settings_path) -> bool:
+    """Idempotently add the DevKit SessionStart hook to a Claude Code settings file.
+
+    Returns True if the file was changed. Existing settings and hooks are preserved.
+    """
+    import json
+    from pathlib import Path as _Path
+
+    settings_path = _Path(str(settings_path))
+    data: dict = {}
+    if settings_path.exists():
+        text = settings_path.read_text(encoding="utf-8").strip()
+        data = json.loads(text) if text else {}
+    groups = data.setdefault("hooks", {}).setdefault("SessionStart", [])
+    for group in groups:
+        for hook in group.get("hooks", []):
+            if "devkit context inject" in str(hook.get("command", "")):
+                return False
+    groups.append({"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": 30}]})
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return True
 
 
 if __name__ == "__main__":

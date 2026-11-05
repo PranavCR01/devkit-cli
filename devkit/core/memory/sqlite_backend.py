@@ -4,15 +4,15 @@ import json
 import sqlite3
 import struct
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-
-import numpy as np
+from typing import Iterator
 
 from devkit.core.memory.store import Fact, FactType, MemoryStore, SearchResult
 from devkit.core.search.rrf import rrf_merge
 
-MEMORY_DB = Path.home() / ".devkit" / "memory.db"
+from devkit.paths import MEMORY_DB
 CONTRADICTION_THRESHOLD = 0.85
 EMBEDDING_DIM = 384
 
@@ -78,15 +78,16 @@ class SQLiteBackend(MemoryStore):
         contradicted = self._find_contradictions(embedding, fact_type, project)
 
         with self._connect() as conn:
-            for old_id in contradicted:
+            for old_id, sim in contradicted:
                 conn.execute(
-                    "UPDATE facts SET invalid_at = ? WHERE id = ?", (now, old_id)
+                    "UPDATE facts SET invalid_at = ?, invalid_reason = ? WHERE id = ?",
+                    (now, f"superseded by {fact_id}", old_id),
                 )
                 conn.execute(
                     """INSERT INTO contradictions
                            (id, new_fact_id, old_fact_id, similarity, detected_at)
                            VALUES (?, ?, ?, ?, ?)""",
-                    (str(uuid.uuid4()), fact_id, old_id, CONTRADICTION_THRESHOLD, now),
+                    (str(uuid.uuid4()), fact_id, old_id, round(sim, 4), now),
                 )
 
             conn.execute(
@@ -137,9 +138,10 @@ class SQLiteBackend(MemoryStore):
         sem_ids = {fid for fid, _ in semantic}
         kw_ids = {fid for fid, _ in keyword}
 
+        facts = self._get_facts([fid for fid, _ in merged])
         results: list[SearchResult] = []
         for fact_id, score in merged:
-            fact = self._get_fact(fact_id)
+            fact = facts.get(fact_id)
             if fact is None:
                 continue
             if fact_id in sem_ids and fact_id in kw_ids:
@@ -156,7 +158,8 @@ class SQLiteBackend(MemoryStore):
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             conn.execute(
-                "UPDATE facts SET invalid_at = ? WHERE id = ?", (now, fact_id)
+                "UPDATE facts SET invalid_at = ?, invalid_reason = ? WHERE id = ?",
+                (now, reason, fact_id),
             )
 
     def get_snapshot(self, project: str, token_cap: int = 2000) -> str:
@@ -164,11 +167,7 @@ class SQLiteBackend(MemoryStore):
         sections: list[str] = []
 
         with self._connect() as conn:
-            ws = conn.execute(
-                "SELECT name FROM workstreams WHERE project = ? ORDER BY updated_at DESC LIMIT 1",
-                (project,),
-            ).fetchone()
-            ws_name = ws["name"] if ws else None
+            ws_name = self._active_workstream(conn, project)
 
             decisions = conn.execute(
                 """SELECT content, valid_at FROM facts
@@ -251,6 +250,33 @@ class SQLiteBackend(MemoryStore):
                     (str(uuid.uuid4()), project, name, json.dumps(context), now, now),
                 )
 
+    def _active_workstream(self, conn, project: str) -> str | None:
+        row = conn.execute(
+            "SELECT name FROM workstreams WHERE project = ? ORDER BY active DESC, updated_at DESC LIMIT 1",
+            (project,),
+        ).fetchone()
+        return row["name"] if row else None
+
+    def active_workstream(self, project: str) -> str | None:
+        with self._connect() as conn:
+            return self._active_workstream(conn, project)
+
+    def set_active_workstream(self, name: str, project: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute("UPDATE workstreams SET active = 0 WHERE project = ?", (project,))
+            if not conn.execute("SELECT 1 FROM workstreams WHERE project = ? AND name = ?",
+                                (project, name)).fetchone():
+                conn.execute(
+                    """INSERT INTO workstreams (id, project, name, snapshot, created_at, updated_at)
+                       VALUES (?, ?, ?, '{}', ?, ?)""",
+                    (str(uuid.uuid4()), project, name, now, now),
+                )
+            conn.execute(
+                "UPDATE workstreams SET active = 1, updated_at = ? WHERE project = ? AND name = ?",
+                (now, project, name),
+            )
+
     def load_workstream(self, name: str, project: str) -> dict | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -303,21 +329,32 @@ class SQLiteBackend(MemoryStore):
     def list_workstreams(self, project: str) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT name, updated_at FROM workstreams WHERE project = ? ORDER BY updated_at DESC",
+                "SELECT name, updated_at, active FROM workstreams WHERE project = ? "
+                "ORDER BY active DESC, updated_at DESC",
                 (project,),
             ).fetchall()
-        return [{"name": row["name"], "updated_at": row["updated_at"]} for row in rows]
+        return [{"name": row["name"], "updated_at": row["updated_at"], "active": bool(row["active"])}
+                for row in rows]
 
     def get_fact(self, fact_id: str) -> Fact | None:
         return self._get_fact(fact_id)
 
     # ── private ───────────────────────────────────────────────────────────────
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Commit on success, roll back on error, and ALWAYS close.
+
+        sqlite3.Connection's own context manager only commits; leaked
+        connections keep the .db file locked on Windows."""
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        _load_sqlite_vec(conn)
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            _load_sqlite_vec(conn)
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -393,6 +430,7 @@ class SQLiteBackend(MemoryStore):
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_facts_workstream ON facts(workstream)"
             )
+            self._migrate(conn)
             # FTS5 virtual table for keyword search
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
@@ -409,10 +447,23 @@ class SQLiteBackend(MemoryStore):
                 )
             """)
 
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Additive, idempotent schema migrations for existing memory.db files."""
+        def cols(table: str) -> set[str]:
+            return {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if "invalid_reason" not in cols("facts"):
+            conn.execute("ALTER TABLE facts ADD COLUMN invalid_reason TEXT")
+        if "active" not in cols("workstreams"):
+            conn.execute("ALTER TABLE workstreams ADD COLUMN active INTEGER NOT NULL DEFAULT 0")
+
     def _find_contradictions(
         self, embedding: list[float], fact_type: str, project: str
-    ) -> list[str]:
-        """Return IDs of valid same-type facts above the cosine similarity threshold."""
+    ) -> list[tuple[str, float]]:
+        """Return (id, similarity) of valid same-type facts at/above the threshold.
+
+        Note: this is near-duplicate superseding (a newer, very similar fact
+        replaces an older one), not logical contradiction detection."""
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT id, embedding FROM facts
@@ -420,15 +471,17 @@ class SQLiteBackend(MemoryStore):
                 (fact_type, project),
             ).fetchall()
 
+        import numpy as np  # lazy: numpy ships with the [memory] extra only
+
         new_vec = np.array(embedding, dtype=np.float32)
-        contradicted: list[str] = []
+        contradicted: list[tuple[str, float]] = []
         for row in rows:
             if not row["embedding"]:
                 continue
             existing = np.frombuffer(row["embedding"], dtype=np.float32)
             sim = float(np.dot(new_vec, existing))
             if sim >= CONTRADICTION_THRESHOLD:
-                contradicted.append(row["id"])
+                contradicted.append((row["id"], sim))
         return contradicted
 
     def _semantic_search(
@@ -439,34 +492,72 @@ class SQLiteBackend(MemoryStore):
         include_invalid: bool,
         limit: int,
     ) -> list[tuple[str, float]]:
+        if projects or fact_types:
+            return self._scoped_semantic_search(embedding, projects, fact_types, include_invalid, limit)
+
         query_bytes = _pack(embedding)
         with self._connect() as conn:
-            rows = conn.execute(
-                """SELECT fvm.fact_id, fv.distance
-                   FROM fact_vec fv
-                   JOIN fact_vec_map fvm ON fv.rowid = fvm.rowid
-                   WHERE fv.embedding MATCH ? AND k = ?
-                   ORDER BY fv.distance""",
-                (query_bytes, limit * 3),
-            ).fetchall()
+            total = conn.execute("SELECT COUNT(*) FROM fact_vec_map").fetchone()[0]
+        k = min(max(limit * 3, 10), max(total, 1))
+        while True:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """SELECT fvm.fact_id, fv.distance
+                       FROM fact_vec fv
+                       JOIN fact_vec_map fvm ON fv.rowid = fvm.rowid
+                       WHERE fv.embedding MATCH ? AND k = ?
+                       ORDER BY fv.distance""",
+                    (query_bytes, k),
+                ).fetchall()
+            facts = self._get_facts([r["fact_id"] for r in rows])
+            results: list[tuple[str, float]] = []
+            for row in rows:
+                fact = facts.get(row["fact_id"])
+                if fact is None or (not include_invalid and fact.invalid_at is not None):
+                    continue
+                # Convert L2 distance to a positive score (lower distance = higher score)
+                results.append((row["fact_id"], 1.0 / (1.0 + row["distance"])))
+                if len(results) >= limit:
+                    return results
+            if k >= total:
+                return results
+            k = min(k * 4, total)  # adaptive over-fetch when many neighbours are filtered out
 
-        results: list[tuple[str, float]] = []
-        for row in rows:
-            fact = self._get_fact(row["fact_id"])
-            if fact is None:
-                continue
-            if not include_invalid and fact.invalid_at is not None:
-                continue
-            if projects and fact.project not in projects:
-                continue
-            if fact_types and fact.fact_type not in fact_types:
-                continue
-            # Convert L2 distance to a positive score (lower distance = higher score)
-            score = 1.0 / (1.0 + row["distance"])
-            results.append((row["fact_id"], score))
-            if len(results) >= limit:
-                break
-        return results
+    def _scoped_semantic_search(
+        self,
+        embedding: list[float],
+        projects: list[str] | None,
+        fact_types: list[FactType] | None,
+        include_invalid: bool,
+        limit: int,
+    ) -> list[tuple[str, float]]:
+        """Exact cosine search restricted in SQL to the requested scope.
+
+        A global KNN followed by post-filtering silently drops in-scope results
+        once other projects dominate the nearest neighbours."""
+        import numpy as np
+
+        conds, params = ["embedding IS NOT NULL"], []
+        if projects:
+            conds.append(f"project IN ({','.join('?' * len(projects))})")
+            params += list(projects)
+        if fact_types:
+            conds.append(f"fact_type IN ({','.join('?' * len(fact_types))})")
+            params += list(fact_types)
+        if not include_invalid:
+            conds.append("invalid_at IS NULL")
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT id, embedding FROM facts WHERE {' AND '.join(conds)}", params
+            ).fetchall()
+        if not rows:
+            return []
+        q = np.array(embedding, dtype=np.float32)
+        mat = np.stack([np.frombuffer(r["embedding"], dtype=np.float32) for r in rows])
+        sims = mat @ q
+        order = np.argsort(-sims)[:limit]
+        # Same score scale as the KNN path: L2 distance of unit vectors = sqrt(2 - 2cos)
+        return [(rows[i]["id"], 1.0 / (1.0 + float(np.sqrt(max(0.0, 2 - 2 * sims[i]))))) for i in order]
 
     def _keyword_search(
         self,
@@ -480,22 +571,32 @@ class SQLiteBackend(MemoryStore):
         # FTS5 default AND would require every word present in one document.
         terms = [t.replace('"', '""') for t in query.split() if t]
         fts_query = " OR ".join(f'"{t}"' for t in terms) if terms else query
+        conds, params = ["facts_fts MATCH ?"], [fts_query]
+        if projects:
+            conds.append(f"f.project IN ({','.join('?' * len(projects))})")
+            params += list(projects)
+        if fact_types:
+            conds.append(f"f.fact_type IN ({','.join('?' * len(fact_types))})")
+            params += list(fact_types)
+        if not include_invalid:
+            conds.append("f.invalid_at IS NULL")
         with self._connect() as conn:
             try:
                 rows = conn.execute(
-                    """SELECT fact_id, rank
-                       FROM facts_fts
-                       WHERE content MATCH ?
-                       ORDER BY rank
-                       LIMIT ?""",
-                    (fts_query, limit * 3),
+                    f"""SELECT facts_fts.fact_id AS fact_id, facts_fts.rank AS rank
+                        FROM facts_fts JOIN facts f ON f.id = facts_fts.fact_id
+                        WHERE {' AND '.join(conds)}
+                        ORDER BY facts_fts.rank
+                        LIMIT ?""",
+                    (*params, limit),
                 ).fetchall()
             except sqlite3.OperationalError:
                 return []
 
+        facts = self._get_facts([r["fact_id"] for r in rows])
         results: list[tuple[str, float]] = []
         for row in rows:
-            fact = self._get_fact(row["fact_id"])
+            fact = facts.get(row["fact_id"])
             if fact is None:
                 continue
             if not include_invalid and fact.invalid_at is not None:
@@ -509,6 +610,19 @@ class SQLiteBackend(MemoryStore):
             if len(results) >= limit:
                 break
         return results
+
+    def _get_facts(self, ids: list[str]) -> dict[str, Fact]:
+        if not ids:
+            return {}
+        out: dict[str, Fact] = {}
+        with self._connect() as conn:
+            for i in range(0, len(ids), 500):
+                batch = ids[i:i + 500]
+                rows = conn.execute(
+                    f"SELECT * FROM facts WHERE id IN ({','.join('?' * len(batch))})", batch
+                ).fetchall()
+                out.update({r["id"]: _row_to_fact(r) for r in rows})
+        return out
 
     def _get_fact(self, fact_id: str) -> Fact | None:
         with self._connect() as conn:

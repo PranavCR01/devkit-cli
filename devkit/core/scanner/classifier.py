@@ -107,15 +107,29 @@ def is_tier3(file_path: str) -> bool:
     return False
 
 
+def _path_tokens(path: str) -> list[str]:
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", path.replace("\\", "/"))
+    return [t for t in re.split(r"[^A-Za-z0-9]+", text.lower()) if t]
+
+
+def _name_hit(pattern: str, token: str) -> bool:
+    if token in (pattern, pattern + "s"):
+        return True
+    # long patterns are specific enough to match as prefixes (database -> databases_util)
+    return len(pattern) >= 5 and token.startswith(pattern)
+
+
 def is_tier1(file_path: str, content: str) -> bool:
-    lower = file_path.lower().replace("\\", "/")
-    if any(pattern in lower for pattern in TIER1_NAME_PATTERNS):
+    """file_path must be relative to the scan root: matching an absolute path
+    makes every file under /home/user or C:\\Users\\... look security-critical."""
+    tokens = _path_tokens(file_path)
+    if any(_name_hit(pat, tok) for pat in TIER1_NAME_PATTERNS for tok in tokens):
         return True
     for pkg in TIER1_IMPORT_PACKAGES:
         if f"'{pkg}'" in content or f'"{pkg}"' in content:
             return True
     for pkg in TIER1_PYTHON_IMPORTS:
-        if f"import {pkg}" in content or f"from {pkg}" in content:
+        if re.search(rf"^\s*(import|from)\s+{re.escape(pkg)}\b", content, re.MULTILINE):
             return True
     return False
 
@@ -128,9 +142,10 @@ def classify_files(
     tier2: list[dict] = []
     skipped = 0
     for file in files:
-        if is_tier3(file["path"]):
+        rel = file.get("rel", file["path"])
+        if is_tier3(rel):
             skipped += 1
-        elif is_tier1(file["path"], file["content"]):
+        elif is_tier1(rel, file["content"]):
             tier1.append(file)
         else:
             tier2.append(file)
@@ -140,15 +155,23 @@ def classify_files(
 class FileClassifier:
     """High-level classifier that walks a project directory."""
 
+    def __init__(self, max_file_bytes: int | None = None) -> None:
+        self.max_file_bytes = max_file_bytes or MAX_FILE_BYTES
+
     def classify(
         self,
         project_path: str,
         graph: dict | None = None,
+        priority_paths: list[str] | None = None,
     ) -> tuple[list[str], list[str]]:
-        """Return (tier1_files, tier2_files) as lists of absolute path strings."""
+        """Return (tier1_files, tier2_files) as path strings (as walked from project_path).
+
+        priority_paths: project-relative paths that must be Tier 1 (e.g. graph
+        nodes with high inbound degree from GraphGuide.get_tier1_files()).
+        """
         files = self._collect_files(project_path)
-        if graph:
-            return self._graph_guided_tier1(files, graph)
+        if graph or priority_paths:
+            return self._graph_guided_tier1(files, graph or {}, priority_paths or [])
         return self._heuristic_classify(files)
 
     def _collect_files(self, project_path: str) -> list[dict]:
@@ -157,15 +180,15 @@ class FileClassifier:
         for p in root.rglob("*"):
             if not p.is_file():
                 continue
-            if any(part in SKIP_DIRS for part in p.parts):
+            if any(part in SKIP_DIRS for part in p.relative_to(root).parts):
                 continue
-            if p.stat().st_size > MAX_FILE_BYTES:
+            if p.stat().st_size > self.max_file_bytes:
                 continue
             try:
                 content = p.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
-            result.append({"path": str(p), "content": content})
+            result.append({"path": str(p), "rel": p.relative_to(root).as_posix(), "content": content})
         return result
 
     def _heuristic_classify(self, files: list[dict]) -> tuple[list[str], list[str]]:
@@ -175,22 +198,47 @@ class FileClassifier:
         return tier1, tier2
 
     def _graph_guided_tier1(
-        self, files: list[dict], graph: dict
+        self, files: list[dict], graph: dict, priority_paths: list[str]
     ) -> tuple[list[str], list[str]]:
-        """Use knowledge graph node types and layers to identify high-priority files."""
-        priority_paths: set[str] = set()
+        """Graph node types (endpoint/schema/table) and high-inbound nodes are Tier 1.
+
+        Graph filePaths are project-relative, so they are compared against each
+        file's project-relative path (not the walk path).
+        """
+        priority = {normalize_rel(p) for p in priority_paths}
         for node in graph.get("nodes", []):
             if node.get("type") in ("endpoint", "schema", "table"):
                 if fp := node.get("filePath"):
-                    priority_paths.add(fp)
+                    priority.add(normalize_rel(fp))
 
         tier1: list[str] = []
         tier2: list[str] = []
         for f in files:
-            if is_tier3(f["path"]):
+            rel = f.get("rel", f["path"])
+            if is_tier3(rel):
                 continue
-            if f["path"] in priority_paths or is_tier1(f["path"], f["content"]):
+            if rel in priority or is_tier1(rel, f["content"]):
                 tier1.append(f["path"])
             else:
                 tier2.append(f["path"])
         return tier1, tier2
+
+
+def normalize_rel(path: str) -> str:
+    p = path.replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p.lstrip("/") if not re.match(r"^[A-Za-z]:/", p) else p
+
+
+def to_project_relative(path: str, root: str | Path) -> str:
+    """Best-effort conversion of a finding/graph path to a project-relative posix path."""
+    root_p = Path(root).resolve()
+    p = Path(path)
+    candidates = [p] if p.is_absolute() else [Path.cwd() / p, root_p / p]
+    for c in candidates:
+        try:
+            return c.resolve().relative_to(root_p).as_posix()
+        except (ValueError, OSError):
+            continue
+    return normalize_rel(path)

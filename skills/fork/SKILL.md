@@ -1,7 +1,7 @@
 ---
-name: devkit:fork
-description: Extract a feature pattern (subgraph + memory decisions) from one project as a reusable blueprint, then apply it as context in a new project. Sub-commands: <feature> --from <project>, list, inspect, apply, delete.
-argument-hint: ["<feature> --from <project> [--name blueprint-name] [--max-nodes 30]", "list", "inspect <blueprint-name>", "apply <blueprint-name> [--context-only]", "delete <blueprint-name>"]
+name: fork
+description: Extract a feature pattern (subgraph + memory decisions) from one project as a reusable blueprint, then apply it as context in a new project. Sub-commands: create <feature> --from <project>, list, inspect, apply, delete.
+argument-hint: ["create <feature> --from <project> [--name blueprint-name] [--max-nodes 30]", "list", "inspect <blueprint-name>", "apply <blueprint-name> [--context-only]", "delete <blueprint-name>"]
 allowed-tools: Bash(python -m devkit.cli fork *)
 ---
 
@@ -9,7 +9,7 @@ Extract and reuse feature patterns across projects.
 
 ## Sub-commands
 
-- **`<feature>` --from `<project>`** — extract feature and save as blueprint
+- **create `<feature>` --from `<project>`** — extract feature and save as blueprint
 - **list** — show all available blueprints
 - **inspect** `<name>` — show blueprint contents
 - **apply** `<name>` — inject blueprint as context into current session

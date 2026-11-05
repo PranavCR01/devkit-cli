@@ -1,10 +1,10 @@
 from __future__ import annotations
-import asyncio
 import json
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import rich.box
 import typer
@@ -13,12 +13,12 @@ from rich.table import Table
 
 eval_app = typer.Typer(
     name="eval",
-    help="Token optimization via Headroom proxy.",
+    help="Context ablation, judge verification and benchmarking, Headroom proxy.",
     no_args_is_help=True,
 )
 _console = Console()
 
-_SUGGESTIONS_DIR = Path.home() / ".devkit" / "eval" / "suggestions"
+from devkit.paths import SUGGESTIONS_DIR as _SUGGESTIONS_DIR
 
 
 def _api_key() -> str | None:
@@ -174,7 +174,7 @@ def report() -> None:
     suggestions = _load_suggestions()
     if not suggestions:
         typer.echo("\nNo ablation suggestions yet.")
-        typer.echo("Suggestions are generated asynchronously during sessions with 2000+ input tokens.")
+        typer.echo("Generate some with: devkit eval ablate <request.json | transcript.jsonl>")
         return
 
     a_table = Table(title="Ablation Suggestions", box=rich.box.ASCII, show_header=True)
@@ -200,17 +200,127 @@ def report() -> None:
 
 @eval_app.command("learn")
 def learn() -> None:
-    """Run headroom learn to train verbosity detection."""
-    result = subprocess.run(
-        [sys.executable, "-m", "headroom", "learn", "--verbosity"],
-        check=False,
-    )
+    """Run `headroom learn --verbosity` to train verbosity detection."""
+    import shutil
+    exe = shutil.which("headroom")  # headroom does not support `python -m headroom`
+    if not exe:
+        typer.echo("[!] headroom not found. Run: pip install -e '.[eval]'")
+        raise typer.Exit(1)
+    result = subprocess.run([exe, "learn", "--verbosity"], check=False)
     raise typer.Exit(result.returncode)
+
+
+@eval_app.command("ablate")
+def ablate_cmd(
+    source: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                  help="Captured request body (.json) or Claude Code transcript (.jsonl)."),
+    max_chunks: int = typer.Option(8, "--max-chunks", help="Ablate at most N chunks (largest first)."),
+    min_tokens: int = typer.Option(100, "--min-tokens", help="Ignore chunks smaller than this."),
+    model: Optional[str] = typer.Option(None, "--model", help="Replay model (default: fast_model)."),
+    samples: int = typer.Option(1, "--samples", help="Judge samples per ordering."),
+    no_judge: bool = typer.Option(False, "--no-judge", help="Skip judge; candidates stay unverified."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan and call budget; no API calls."),
+) -> None:
+    """Ablate context chunks of a captured request and verify with the judge."""
+    from devkit.core.eval.ablation import AblationRunner, load_request
+
+    try:
+        body, fidelity = load_request(source)
+    except (ValueError, json.JSONDecodeError) as exc:
+        typer.echo(f"[ERROR] Could not load {source}: {exc}")
+        raise typer.Exit(1)
+
+    if fidelity == "transcript":
+        typer.echo("[i] Transcript input: system prompt and tool schemas are not recorded there,")
+        typer.echo("    so tool calls are replayed as text. Use a captured request body for full fidelity.")
+
+    if dry_run:
+        runner = AblationRunner(client=object(), model=model or "-", max_chunks=max_chunks,
+                                min_chunk_tokens=min_tokens)
+        chunks, rep = runner.plan(body)
+        judge_calls = 0 if no_judge else 2 * samples
+        typer.echo(f"Chunks: {rep.chunks_considered} found | {rep.skipped_cached} in cached prefix (skipped) | "
+                   f"{rep.skipped_small} below {min_tokens} tokens | {len(chunks)} planned")
+        for c in chunks:
+            typer.echo(f"  {c.location:<40} ~{c.tokens} tokens")
+        typer.echo(f"Max API calls: {2 + len(chunks) * (1 + judge_calls)}")
+        return
+
+    key = _api_key()
+    if not key:
+        typer.echo("[ERROR] No API key configured. Run: devkit config set anthropic_api_key <key>")
+        raise typer.Exit(1)
+
+    import anthropic
+    from devkit.core.eval.judge import ClaudeJudge
+    client = anthropic.Anthropic(api_key=key)
+    judge = None if no_judge else ClaudeJudge(client=client, model=model, samples=samples)
+    runner = AblationRunner(client=client, model=model, judge=judge, max_chunks=max_chunks,
+                            min_chunk_tokens=min_tokens, on_progress=lambda m: typer.echo(f"  {m}"))
+    rep = runner.run(body, source=str(source), fidelity=fidelity)
+
+    typer.echo(f"\nAPI calls: {rep.api_calls} | baseline noise (Jaccard): {rep.baseline_distance}")
+    for err in rep.errors:
+        typer.echo(f"[WARN] {err}")
+    if not rep.candidates:
+        typer.echo("No removable chunks found (every ablation changed the output, or nothing to ablate).")
+        return
+    safe = [c for c in rep.candidates if c["verdict"] == "safe"]
+    typer.echo(f"{len(rep.candidates)} candidate(s); {len(safe)} judged SAFE "
+               f"(~{sum(c['tokens_saved'] for c in safe)} tokens removable).")
+    typer.echo("Details: devkit eval report")
+
+
+@eval_app.command("bench")
+def bench_cmd(
+    dataset: Optional[Path] = typer.Argument(None, help="JSONL dataset (default: bundled judge_bench.jsonl)."),
+    samples: int = typer.Option(1, "--samples", help="Judge samples per ordering."),
+    model: Optional[str] = typer.Option(None, "--model", help="Judge model (default: fast_model)."),
+    output: str = typer.Option("text", "--output", help="text | json"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate the dataset and print the call budget."),
+) -> None:
+    """Benchmark the judge on labeled cases: accuracy, false-SAFE rate, order agreement."""
+    from devkit.core.eval.bench import DEFAULT_DATASET, load_dataset, run_bench, save_report
+
+    path = dataset or DEFAULT_DATASET
+    try:
+        cases = load_dataset(path)
+    except (ValueError, json.JSONDecodeError, OSError) as exc:
+        typer.echo(f"[ERROR] {exc}")
+        raise typer.Exit(1)
+    n_eq = sum(c["label"] == "equivalent" for c in cases)
+    if dry_run:
+        typer.echo(f"{len(cases)} cases ({n_eq} equivalent, {len(cases) - n_eq} degraded); "
+                   f"{len(cases) * 2 * samples} judge calls.")
+        return
+    key = _api_key()
+    if not key:
+        typer.echo("[ERROR] No API key configured. Run: devkit config set anthropic_api_key <key>")
+        raise typer.Exit(1)
+    from devkit.core.eval.judge import ClaudeJudge
+    judge = ClaudeJudge(api_key=key, model=model, samples=samples)
+    rep = run_bench(judge, cases)
+    saved = save_report(rep, judge.model, samples, str(path))
+    if output == "json":
+        typer.echo(json.dumps(rep.to_dict(), indent=2))
+        return
+    table = Table(title=f"Judge benchmark ({judge.model}, samples={samples})", box=rich.box.ASCII)
+    table.add_column("Metric")
+    table.add_column("Value")
+    for k, v in rep.summary().items():
+        table.add_row(k, str(v))
+    _console.print(table)
+    for row in rep.rows:
+        if not row["correct"]:
+            typer.echo(f"  MISS {row['id']:<22} label={row['label']:<10} verdict={row['verdict']}")
+    typer.echo(f"Saved: {saved}")
 
 
 @eval_app.command("verify")
 def verify_cmd(
     candidate_id: str = typer.Argument(..., help="Candidate ID or prefix to verify."),
+    samples: int = typer.Option(1, "--samples", help="Judge samples per ordering."),
+    force: bool = typer.Option(False, "--force", help="Re-judge even if already verified."),
 ) -> None:
     """Run Claude-as-judge on an ablation suggestion."""
     found = _find_suggestion(candidate_id)
@@ -221,7 +331,7 @@ def verify_cmd(
 
     path, candidate = found
 
-    if candidate.get("verified"):
+    if candidate.get("verified") and not force:
         typer.echo(f"Already verified. Verdict: {candidate.get('verdict')}")
         typer.echo(f"Reasoning: {candidate.get('verdict_reasoning', '-')}")
         return
@@ -235,12 +345,14 @@ def verify_cmd(
     typer.echo(f"Tokens at stake: {candidate.get('tokens_saved', 0)}")
 
     from devkit.core.eval.judge import ClaudeJudge, JudgeVerdict
-    judge = ClaudeJudge(api_key=key)
+    judge = ClaudeJudge(api_key=key, samples=samples)
 
-    verdict, reasoning = asyncio.run(judge.verify(
-        original_output=candidate.get("original_output", ""),
-        optimized_output=candidate.get("reduced_output", ""),
-    ))
+    result = judge.judge(
+        candidate.get("original_output", ""),
+        candidate.get("reduced_output", ""),
+        candidate.get("task", ""),
+    )
+    verdict, reasoning = result.verdict, result.reasoning
 
     candidate["verified"] = True
     candidate["verdict"] = verdict.value
@@ -253,7 +365,7 @@ def verify_cmd(
     verdict_label = {
         JudgeVerdict.SAFE: "[SAFE] Chunk can be safely removed.",
         JudgeVerdict.UNSAFE: "[UNSAFE] Removing this chunk degrades output.",
-        JudgeVerdict.INCONCLUSIVE: "[INCONCLUSIVE] Orderings disagreed.",
+        JudgeVerdict.INCONCLUSIVE: "[INCONCLUSIVE] Not safe to apply (disagreement or judge error).",
     }[verdict]
 
     typer.echo(verdict_label)
@@ -264,9 +376,20 @@ def verify_cmd(
 def versions(
     project: str = typer.Option("", "--project", "-p", help="Filter by project name."),
     limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show."),
+    save: Optional[Path] = typer.Option(None, "--save", exists=True, dir_okay=False,
+                                        help="Snapshot this prompt file as a new version."),
 ) -> None:
-    """Show prompt version history from memory store."""
-    from devkit.core.eval.versions import list_versions
+    """Show (or save) prompt version history in the memory store."""
+    from devkit.core.eval.versions import list_versions, save_version
+
+    if save is not None:
+        proj = project or Path.cwd().name
+        fid = save_version(save.read_text(encoding="utf-8"), proj)
+        if fid is None:
+            typer.echo("[!] Could not save version (needs: pip install -e '.[memory]').")
+            raise typer.Exit(1)
+        typer.echo(f"[OK] Saved prompt version {str(fid)[:8]} for project '{proj}'")
+        return
 
     rows = list_versions(project=project or None, limit=limit)
 
@@ -275,7 +398,7 @@ def versions(
             typer.echo(f"No prompt versions found for project: {project}")
         else:
             typer.echo("No prompt versions found.")
-            typer.echo("Versions are saved via devkit.core.eval.versions.save_version().")
+            typer.echo("Save one with: devkit eval versions --save <prompt-file> --project <name>")
         return
 
     table = Table(title="Prompt Versions", box=rich.box.ASCII, show_header=True)
