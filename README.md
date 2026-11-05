@@ -112,7 +112,7 @@ devkit eval ablate request.json --dry-run     # plan + max API calls, no spend
 devkit eval ablate request.json --samples 3   # run it
 devkit eval report
 devkit eval verify <id> --samples 3
-devkit eval bench                             # how trustworthy is the judge?
+devkit eval bench --split test --runs 3        # how trustworthy is the judge?
 ```
 
 Real output from `--dry-run` on a request whose first message is behind a cache breakpoint:
@@ -129,7 +129,8 @@ How it works:
 - **Nothing inside the cached prefix is ablated.** That means nothing up to the last `cache_control` breakpoint, and nothing at all when the request uses top-level automatic caching. Changing a cached prefix forces a cache re-write at 1.25× the input price, which can cost more than the removal saves.
 - The original request is replayed twice to measure noise. Jaccard distance against that baseline only filters out outputs that clearly changed; **the judge makes the decision**.
 - The judge returns structured JSON and runs every comparison in both orderings, `--samples N` times each. It returns SAFE only if every run finds the reduced output no worse and no run reports lost information. If any call errors, the verdict is **INCONCLUSIVE, never SAFE**.
-- `eval bench` runs the judge on labeled pairs (14 bundled code-oriented cases). It reports accuracy, **false-SAFE rate** (degraded output judged safe, the dangerous failure), false-reject rate, inconclusive rate, and order agreement. A judge that always answers "tie" scores 100% false-SAFE.
+- `eval bench` measures the judge on 120 cases built from 30 annotated seeds: 60 degraded and 60 equivalent, split 60/60 into `dev` and `test` by seed. **Degraded labels come from construction**, not from a model: a deterministic operator changes exactly one annotated part of a correct answer, and each mutation records what it contradicts. The 9 operators are drop a step, change a constant, off-by-one, swap a path, flip a condition, drop a constraint, invent an API, wrong tool argument, and drop a tool call.
+- It reports the **false-SAFE rate** (degraded output judged safe, the dangerous failure) with a 95% Wilson interval, errors per operator, and ranges across `--runs`. Model-written paraphrases are reported separately. Method, results, and limits are in [`docs/eval/judge-bench.md`](docs/eval/judge-bench.md); `devkit eval bench-build` regenerates the dataset from the seeds deterministically.
 - Claude Code transcripts (`.jsonl`) are accepted too. They don't record the system prompt or tool schemas, so tool calls are replayed as text and the run is labeled `fidelity: transcript`.
 
 `devkit eval start|stop|status|learn` manage the [Headroom](https://github.com/headroom-ai/headroom) compression proxy (port 8787; set `ANTHROPIC_BASE_URL=http://127.0.0.1:8787`).
