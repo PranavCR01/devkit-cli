@@ -1,0 +1,9 @@
+{"nodes": [
+ {"id": "app", "name": "app", "type": "endpoint", "filePath": "app.py"},
+ {"id": "config", "name": "config", "type": "module", "filePath": "config.py"},
+ {"id": "webhooks", "name": "webhooks", "type": "endpoint", "filePath": "webhooks.py"},
+ {"id": "utils", "name": "utils", "type": "module", "filePath": "utils.py"}],
+ "edges": [
+ {"source": "app", "target": "config", "type": "imports"},
+ {"source": "webhooks", "target": "app", "type": "imports"},
+ {"source": "app", "target": "webhooks", "type": "imports"}]}

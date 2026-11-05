@@ -1,0 +1,47 @@
+{
+ "scene": "memory",
+ "steps": [
+  {
+   "cmd": "devkit memory save \"Invoices are multi-tenant: every query filters by org_id taken from the session, never from the request\" --type decision",
+   "display": "devkit memory save \"Invoices are multi-tenant: every query filters by org_id taken from the session, never from the request\" --type decision",
+   "output": "[OK] Saved (decision) to project 'acme-billing'\n     id: 574bdfc2-181f-49ed-a700-a564520ed36a\n",
+   "seconds": 11.5,
+   "code": 0
+  },
+  {
+   "cmd": "devkit memory save \"All SQL uses sqlite3 ? placeholders; no f-string SQL anywhere\" --type decision",
+   "display": "devkit memory save \"All SQL uses sqlite3 ? placeholders; no f-string SQL anywhere\" --type decision",
+   "output": "[OK] Saved (decision) to project 'acme-billing'\n     id: 08cbd992-095e-48bb-964e-00f45dc6d352\n",
+   "seconds": 11.4,
+   "code": 0
+  },
+  {
+   "cmd": "devkit memory save \"Stripe webhooks verify the Stripe-Signature header before parsing the body\" --type architecture",
+   "display": "devkit memory save \"Stripe webhooks verify the Stripe-Signature header before parsing the body\" --type architecture",
+   "output": "[OK] Saved (architecture) to project 'acme-billing'\n     id: 37c70e53-bbe6-40b1-8d36-8ba1adc7dccc\n",
+   "seconds": 11.4,
+   "code": 0
+  },
+  {
+   "cmd": "devkit memory save \"mark_paid's UPDATE was never committed; use 'with db() as conn'\" --type bug",
+   "display": "devkit memory save \"mark_paid's UPDATE was never committed; use 'with db() as conn'\" --type bug",
+   "output": "[OK] Saved (bug) to project 'acme-billing'\n     id: c8ac3f62-9b3c-481a-89f5-a64710a27f33\n",
+   "seconds": 11.1,
+   "code": 0
+  },
+  {
+   "cmd": "devkit memory switch payments --note \"webhook retries half-done\"",
+   "display": "devkit memory switch payments --note \"webhook retries half-done\"",
+   "output": "[OK] Created and switched to workstream 'payments' (project: acme-billing); saved 'main'\n",
+   "seconds": 2.2,
+   "code": 0
+  },
+  {
+   "cmd": "devkit memory save \"Webhook retries reuse one Idempotency-Key per event\" --type decision",
+   "display": "devkit memory save \"Webhook retries reuse one Idempotency-Key per event\" --type decision",
+   "output": "[OK] Saved (decision) to project 'acme-billing'\n     id: 8b44866c-652c-41c0-a3b9-13ff98f0bbe6\n     workstream: payments\n",
+   "seconds": 11.0,
+   "code": 0
+  }
+ ]
+}

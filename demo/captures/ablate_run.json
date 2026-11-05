@@ -1,0 +1,12 @@
+{
+ "scene": "ablate_run",
+ "steps": [
+  {
+   "cmd": "devkit eval ablate claude-code-request.json",
+   "display": "devkit eval ablate claude-code-request.json",
+   "output": "  ablating messages[6].content[0] (tool_result) (~544 tokens)\n  ablating messages[4].content[0] (tool_result) (~258 tokens)\n  ablating messages[2].content[0] (tool_result) (~249 tokens)\n\nAPI calls: 9 | baseline noise (Jaccard): 0.078\n2 candidate(s); 2 judged SAFE (~802 tokens removable).\nDetails: devkit eval report\n",
+   "seconds": 26.9,
+   "code": 0
+  }
+ ]
+}

@@ -1,0 +1,19 @@
+{
+ "scene": "app",
+ "steps": [
+  {
+   "cmd": "ls",
+   "display": "ls",
+   "output": "README.md\napp.py\nconfig.py\nrequirements.txt\nutils.py\nwebhooks.py\n",
+   "seconds": 0.0,
+   "code": 0
+  },
+  {
+   "cmd": "sed -n 17,24p app.py",
+   "display": "sed -n 17,24p app.py",
+   "output": "@app.get(\"/invoices\")\ndef list_invoices():\n    org_id = request.args.get(\"org_id\", \"\")\n    status = request.args.get(\"status\", \"open\")\n    query = f\"SELECT id, amount, status FROM invoices WHERE org_id = '{org_id}' AND status = '{status}'\"\n    rows = db().execute(query).fetchall()\n    return jsonify([{\"id\": r[0], \"amount\": r[1], \"status\": r[2]} for r in rows])\n\n",
+   "seconds": 0.0,
+   "code": 0
+  }
+ ]
+}

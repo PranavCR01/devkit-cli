@@ -1,0 +1,12 @@
+{
+ "scene": "ablate_report",
+ "steps": [
+  {
+   "cmd": "devkit eval report 2>&1 | sed -n '/Ablation Suggestions/,$p'",
+   "display": "devkit eval report",
+   "output": "\u001b[3m                                     Ablation Suggestions                                      \u001b[0m\n+---------------------------------------------------------------------------------------------+\n|\u001b[1m \u001b[0m\u001b[1mID      \u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mTokens\u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mVerified\u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mVerdict\u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mChunk Preview                                     \u001b[0m\u001b[1m \u001b[0m|\n|----------+--------+----------+---------+----------------------------------------------------|\n| c99ff93e | 258    | yes      | safe    | blinker==1.8.2 certifi==2024.8.30 charset-normaliz |\n| e8cca92f | 544    | yes      | safe    | tests/test_invoices.py::test_list_invoices_case_1  |\n+---------------------------------------------------------------------------------------------+\n\nVerify a suggestion: devkit eval verify <id>\n",
+   "seconds": 1.5,
+   "code": 0
+  }
+ ]
+}
