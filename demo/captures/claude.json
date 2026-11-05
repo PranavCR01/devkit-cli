@@ -1,0 +1,12 @@
+{
+ "scene": "claude",
+ "steps": [
+  {
+   "cmd": "claude -p \"Without reading any files: what rules must a new query on the invoices table follow here, and what workstream am I on?\" --model claude-sonnet-5-5 --disallowedTools Read Grep Glob Bash Edit Write < /dev/null",
+   "display": "claude -p \"Without reading any files: what rules must a new query on the invoices table follow here, and what workstream am I on?\" --model claude-sonnet-5-5 --disallowedTools Read Grep Glob Bash Edit Write < /dev/null",
+   "output": "You're on the **payments** workstream (acme-billing).\n\nA new query on the invoices table must follow these rules:\n\n1. **Filter by `org_id`.** Invoices are multi-tenant, so every query filters by `org_id`. Take it from the session, never from the request.\n2. **Use `?` placeholders.** All SQL uses sqlite3 `?` placeholders. Don't build SQL with f-strings anywhere.\n3. **Use `with db() as conn`.** If the query writes, run it inside this block so the change is committed. `mark_paid`'s UPDATE was never committed because it skipped this.\n\nTwo related decisions apply if you're working on the Stripe webhook path:\n- Verify the `Stripe-Signature` header before parsing the body.\n- Retries of the same event reuse one Idempotency-Key.\n\nThis comes from the session's DevKit memory. I didn't read any files, so I haven't checked it against the current code.\n",
+   "seconds": 18.4,
+   "code": 0
+  }
+ ]
+}

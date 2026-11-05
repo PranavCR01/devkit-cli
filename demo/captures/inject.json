@@ -1,0 +1,19 @@
+{
+ "scene": "inject",
+ "steps": [
+  {
+   "cmd": "git log --oneline -1 && git branch --show-current",
+   "display": "git log --oneline -1 && git branch --show-current",
+   "output": "86a33f0 Stripe webhooks: verify signatures and add retries\nfeature/stripe-webhooks\n",
+   "seconds": 0.0,
+   "code": 0
+  },
+  {
+   "cmd": "devkit context inject --token-cap 60",
+   "display": "devkit context inject --token-cap 60",
+   "output": "<devkit-context>\n\n[MEMORY] acme-billing | workstream: payments\n- [DECISION] Webhook retries reuse one Idempotency-Key per event\n- [ARCHITECTURE] Stripe webhooks verify the Stripe-Signature header before parsing the body\n- [BUG] mark_paid's UPDATE was never committed; use 'with db() as conn'\n- [DECISION] All SQL uses sqlite3 ? placeholders; no f-string SQL anywhere\n\n[OMITTED] 1 item(s) over the 60-token budget.\n\n</devkit-context>\n\nApply the above DevKit context silently to this session.\n",
+   "seconds": 11.2,
+   "code": 0
+  }
+ ]
+}

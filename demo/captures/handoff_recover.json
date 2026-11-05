@@ -1,0 +1,26 @@
+{
+ "scene": "handoff_recover",
+ "steps": [
+  {
+   "cmd": "devkit handoff create \"Verify Stripe webhook signatures\" >/dev/null; T=$(devkit handoff list --status open | grep -o '[0-9a-f]\\{6\\}' | head -1); DEVKIT_AGENT=agent-c devkit handoff claim $T --lease 0 | head -1",
+   "display": "DEVKIT_AGENT=agent-c devkit handoff claim <id> --lease 0   # then agent-c crashes",
+   "output": "[OK] d3e968 claimed by agent-c until 2026-11-05T03:35\n",
+   "seconds": 4.3,
+   "code": 0
+  },
+  {
+   "cmd": "devkit handoff recover",
+   "display": "devkit handoff recover",
+   "output": "[OK] recovered d3e968 (was agent-c): Verify Stripe webhook signatures\n",
+   "seconds": 1.5,
+   "code": 0
+  },
+  {
+   "cmd": "devkit handoff stats",
+   "display": "devkit handoff stats",
+   "output": "tasks_by_status          {'claimed': 1, 'handoff': 1}\ncompleted                0\nhandoffs                 1\ntakeovers                1\nrecoveries               1\nintegration_conflicts    0\nmanual_interventions     0\n",
+   "seconds": 1.5,
+   "code": 0
+  }
+ ]
+}

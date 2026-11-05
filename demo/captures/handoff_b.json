@@ -1,0 +1,12 @@
+{
+ "scene": "handoff_b",
+ "steps": [
+  {
+   "cmd": "T=$(devkit handoff list | grep -o '[0-9a-f]\\{6\\}' | head -1); DEVKIT_AGENT=agent-b devkit handoff claim $T",
+   "display": "DEVKIT_AGENT=agent-b devkit handoff claim <id>",
+   "output": "[OK] 0d8fdb claimed by agent-b until 2026-11-05T04:05\n<devkit-task id='0d8fdb' project='acme-billing' status='claimed'>\nTASK: Parameterize the /invoices query\n\nACCEPTANCE CRITERIA (all must be checked before `devkit handoff done`):\n  [x] #1 no f-string SQL in app.py\n  [ ] #2 tests pass\n\nHISTORY (oldest first):\n  2026-11-05T03:35 agent-a handoff: query uses ? params now; tests not run yet\n\nSTART HERE (last handover note): query uses ? params now; tests not run yet\n</devkit-task>\n",
+   "seconds": 2.9,
+   "code": 0
+  }
+ ]
+}

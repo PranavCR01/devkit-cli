@@ -1,0 +1,26 @@
+{
+ "scene": "handoff_a",
+ "steps": [
+  {
+   "cmd": "devkit handoff create \"Parameterize the /invoices query\" -a \"no f-string SQL in app.py\" -a \"tests pass\"",
+   "display": "devkit handoff create \"Parameterize the /invoices query\" -a \"no f-string SQL in app.py\" -a \"tests pass\"",
+   "output": "[OK] Task 0d8fdb created: Parameterize the /invoices query\n",
+   "seconds": 1.6,
+   "code": 0
+  },
+  {
+   "cmd": "DEVKIT_AGENT=agent-a devkit handoff claim $(devkit handoff list --status open | grep -o '[0-9a-f]\\{6\\}' | head -1) | head -1",
+   "display": "DEVKIT_AGENT=agent-a devkit handoff claim <id>",
+   "output": "[OK] 0d8fdb claimed by agent-a until 2026-11-05T04:05\n",
+   "seconds": 3.0,
+   "code": 0
+  },
+  {
+   "cmd": "T=$(devkit handoff list | grep -o '[0-9a-f]\\{6\\}' | head -1); DEVKIT_AGENT=agent-a devkit handoff check $T 1 && DEVKIT_AGENT=agent-a devkit handoff release $T -m 'query uses ? params now; tests not run yet'",
+   "display": "DEVKIT_AGENT=agent-a devkit handoff release <id> -m \"query uses ? params now; tests not run yet\"",
+   "output": "[OK] criterion #1 checked\n[OK] 0d8fdb released for takeover\n",
+   "seconds": 4.5,
+   "code": 0
+  }
+ ]
+}

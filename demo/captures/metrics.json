@@ -1,0 +1,12 @@
+{
+ "scene": "metrics",
+ "steps": [
+  {
+   "cmd": "devkit metrics --prs prs.json --transcripts ~/.claude/projects/-home-user-devkit-cli --since 30d",
+   "display": "devkit metrics --prs prs.json --since 30d",
+   "output": "\u001b[3m                             Delivery & AI cost by week                              \u001b[0m\n+-----------------------------------------------------------------------------------+\n|\u001b[1m \u001b[0m\u001b[1mPeriod  \u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mOpened\u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mMerged\u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mMedian cycle h\u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mAI cost\u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mCost/merged PR\u001b[0m\u001b[1m \u001b[0m|\u001b[1m \u001b[0m\u001b[1mSessions\u001b[0m\u001b[1m \u001b[0m|\n|----------+--------+--------+----------------+---------+----------------+----------|\n| 2026-W45 | 1      | 1      | 0.4            | $21.32  | $21.32         | 1        |\n+-----------------------------------------------------------------------------------+\nAI cost $21.32 | attributed to PRs 100% | unattributed $0.00\n  #9     $  21.32  Fix 20 audited issues; add judge benchmark, AI-cost metrics,\nAgent tasks: 0 done | 1 handoffs | 1 recoveries | 0 conflicts | 0 interventions\nCosts are list-price estimates; transcript format is internal to Claude Code.\n",
+   "seconds": 1.4,
+   "code": 0
+  }
+ ]
+}

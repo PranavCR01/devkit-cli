@@ -1,0 +1,12 @@
+{
+ "scene": "ablate_plan",
+ "steps": [
+  {
+   "cmd": "devkit eval ablate claude-code-request.json --dry-run",
+   "display": "devkit eval ablate claude-code-request.json --dry-run",
+   "output": "Chunks: 4 found | 1 in cached prefix (skipped) | 0 below 100 tokens | 3 planned\n  messages[6].content[0] (tool_result)     ~544 tokens\n  messages[4].content[0] (tool_result)     ~258 tokens\n  messages[2].content[0] (tool_result)     ~249 tokens\nMax API calls: 11\n",
+   "seconds": 1.5,
+   "code": 0
+  }
+ ]
+}
