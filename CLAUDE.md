@@ -104,7 +104,7 @@ python -m pytest        # offline; tests set DEVKIT_HOME/CLAUDE_CONFIG_DIR to te
 - Manifest triggers are best-effort — all calls to `Manifest()` in scan.py, memory_cmd.py are wrapped in `try/except Exception: pass`; never block the caller
 - `context inject` must never crash or print to stdout on error — it has 5 nested guards + outer `except Exception: pass`; the session hook depends on silent failure
 - `Manifest.refresh_knowledge_graphs()` also recounts facts via raw `sqlite3` (no sqlite-vec): `SELECT project, COUNT(*) FROM facts WHERE invalid_at IS NULL GROUP BY project`; matches by direct name then basename fallback
-- `context inject` collects all facts into one content string before calling `add_item` once — renders a single `[SNAPSHOT] project / session-snapshot` header, not one per fact
+- `context inject` (via `core/context/injector.build_injection`) packs facts ONE AT A TIME under the token cap after RRF ranking, under a single `[MEMORY] project` header; never add all facts as one item (whole-item drop would inject nothing when over budget). Pinned `context add/build` items go first, whole-item
 - `context list` summary line uses `|` not `·` — the middle-dot is non-ASCII and crashes cp1252
 - Always run /plan before writing any code; show file list and wait for approval
 - Never modify `~/.devkit/` schema without migrating existing data (see `SQLiteBackend._migrate`: additive, idempotent ALTERs)
