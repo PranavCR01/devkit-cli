@@ -75,7 +75,33 @@ outcome; for an equivalent case it's a missed saving.
 
 ## Results
 
-See the "Results" section filled in from the latest run below.
+All runs use the held-out `test` split (60 cases: 30 degraded, 30 equivalent),
+3 runs each, with judge `claude-haiku-5-5` and 1 sample per ordering.
+
+### v2.0, first run (2026-11-05): kept for the record
+
+| Metric | Across 3 runs |
+|---|---|
+| False SAFE | 0/30, 2/30, 1/30 (0-6.7%; 95% CI 1.8-21.3% on the worst run) |
+| Accuracy | 91.7-98.3% |
+| False reject | 3.3-10.0% |
+| Order agreement | 93.3-98.3% |
+
+The 3 false SAFEs, reviewed one by one:
+
+- `s03-d-drop_constraint` (runs 1 and 2) was **a labelling error, not a judge
+  error**. Removing "once, before the loop, so all attempts share it" still
+  left key generation in step 1, before the loop, so the "degraded" answer was
+  correct. The judge's reasoning said exactly that. Fixed in v2.1, which swaps
+  this one case for `s03-d-off_by_one`; the other 119 cases are byte-identical.
+- `s13-d-change_constant` (run 2) was **a real, intermittent judge miss**. The
+  task requires CORS limited to `https://app.acme.com`; the degraded answer
+  uses `origins=["*"]`. The judge noticed the different origin and still
+  returned SAFE.
+
+### v2.1, corrected label (2026-11-05)
+
+<!-- v2.1 results are written here from the saved report -->
 
 ## Limits, and the questions to expect
 
