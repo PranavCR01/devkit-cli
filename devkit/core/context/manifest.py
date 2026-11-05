@@ -82,11 +82,11 @@ class Manifest:
         if not memory_db.exists():
             return
         try:
-            conn = sqlite3.connect(str(memory_db))
-            rows = conn.execute(
-                "SELECT project, COUNT(*) FROM facts WHERE invalid_at IS NULL GROUP BY project"
-            ).fetchall()
-            conn.close()
+            from contextlib import closing
+            with closing(sqlite3.connect(str(memory_db))) as conn:
+                rows = conn.execute(
+                    "SELECT project, COUNT(*) FROM facts WHERE invalid_at IS NULL GROUP BY project"
+                ).fetchall()
         except Exception:
             return
 

@@ -4,8 +4,10 @@ import json
 import sqlite3
 import struct
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
 from devkit.core.memory.store import Fact, FactType, MemoryStore, SearchResult
 from devkit.core.search.rrf import rrf_merge
@@ -339,11 +341,20 @@ class SQLiteBackend(MemoryStore):
 
     # ── private ───────────────────────────────────────────────────────────────
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Commit on success, roll back on error, and ALWAYS close.
+
+        sqlite3.Connection's own context manager only commits; leaked
+        connections keep the .db file locked on Windows."""
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        _load_sqlite_vec(conn)
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            _load_sqlite_vec(conn)
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         with self._connect() as conn:

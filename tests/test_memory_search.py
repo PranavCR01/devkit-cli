@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 from typer.testing import CliRunner
@@ -36,7 +37,7 @@ def test_cli_switch_saves_and_restores_state(backend, monkeypatch):
 def test_contradiction_records_measured_similarity(backend):
     a = backend.save("use postgres for the queue", "decision", "p")
     backend.save("use postgres for the queue now", "decision", "p")
-    with sqlite3.connect(backend.db_path) as conn:
+    with closing(sqlite3.connect(backend.db_path)) as conn:
         sim = conn.execute("SELECT similarity FROM contradictions").fetchone()[0]
         reason = conn.execute("SELECT invalid_reason FROM facts WHERE id = ?", (a.id,)).fetchone()[0]
     assert 0.85 <= sim <= 1.0 and sim != 0.85
@@ -46,7 +47,7 @@ def test_contradiction_records_measured_similarity(backend):
 def test_contradict_persists_reason(backend):
     f = backend.save("tabs over spaces", "preference", "p")
     backend.contradict(f.id, "team voted for spaces")
-    with sqlite3.connect(backend.db_path) as conn:
+    with closing(sqlite3.connect(backend.db_path)) as conn:
         assert conn.execute("SELECT invalid_reason FROM facts WHERE id=?", (f.id,)).fetchone()[0] == \
             "team voted for spaces"
 
@@ -54,7 +55,7 @@ def test_contradict_persists_reason(backend):
 def test_migration_upgrades_old_schema(tmp_path, fake_embedder):
     pytest.importorskip("sqlite_vec")
     db = tmp_path / "old.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("""CREATE TABLE facts (id TEXT PRIMARY KEY, project TEXT NOT NULL, workstream TEXT,
             content TEXT NOT NULL, fact_type TEXT NOT NULL, valid_at TEXT NOT NULL, invalid_at TEXT,
             created_at TEXT NOT NULL, source TEXT DEFAULT 'manual', confidence REAL DEFAULT 1.0,
@@ -66,7 +67,7 @@ def test_migration_upgrades_old_schema(tmp_path, fake_embedder):
                      "'2025','manual',1.0,NULL)")
     from devkit.core.memory.sqlite_backend import SQLiteBackend
     b = SQLiteBackend(db, embedder=fake_embedder)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
         assert "invalid_reason" in cols
         assert conn.execute("SELECT content FROM facts WHERE id='x'").fetchone()[0] == "old fact"

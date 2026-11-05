@@ -1,8 +1,9 @@
 from __future__ import annotations
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from devkit.paths import STATE_DB
 
@@ -69,7 +70,13 @@ class State:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Commit on success, roll back on error, always close (Windows file locks)."""
         conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            with conn:
+                yield conn
+        finally:
+            conn.close()

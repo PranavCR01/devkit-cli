@@ -1,5 +1,6 @@
 from __future__ import annotations
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from devkit.paths import MEMORY_DB
@@ -31,23 +32,22 @@ def list_versions(project: str | None = None, limit: int = 20) -> list[dict]:
     if not MEMORY_DB.exists():
         return []
     try:
-        conn = sqlite3.connect(str(MEMORY_DB))
-        conn.row_factory = sqlite3.Row
-        if project:
-            rows = conn.execute(
-                "SELECT id, project, content, created_at FROM facts "
-                "WHERE content LIKE ? AND project = ? AND invalid_at IS NULL "
-                "ORDER BY created_at DESC LIMIT ?",
-                (f"{_PREFIX}%", project, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, project, content, created_at FROM facts "
-                "WHERE content LIKE ? AND invalid_at IS NULL "
-                "ORDER BY created_at DESC LIMIT ?",
-                (f"{_PREFIX}%", limit),
-            ).fetchall()
-        conn.close()
+        with closing(sqlite3.connect(str(MEMORY_DB))) as conn:
+            conn.row_factory = sqlite3.Row
+            if project:
+                rows = conn.execute(
+                    "SELECT id, project, content, created_at FROM facts "
+                    "WHERE content LIKE ? AND project = ? AND invalid_at IS NULL "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (f"{_PREFIX}%", project, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, project, content, created_at FROM facts "
+                    "WHERE content LIKE ? AND invalid_at IS NULL "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (f"{_PREFIX}%", limit),
+                ).fetchall()
         return [
             {
                 "id": r["id"],

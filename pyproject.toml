@@ -55,3 +55,8 @@ devkit = ["data/*.jsonl"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Leaked SQLite connections lock files on Windows; fail on every platform instead.
+filterwarnings = [
+    "error::ResourceWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]

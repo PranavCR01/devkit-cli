@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -46,14 +47,13 @@ def _get_project_facts(project_name: str, project_path: str) -> list[dict]:
     if not memory_db.exists():
         return []
     try:
-        conn = sqlite3.connect(str(memory_db))
-        rows = conn.execute(
-            "SELECT id, fact_type, content, valid_at FROM facts "
-            "WHERE (project = ? OR project = ?) AND invalid_at IS NULL "
-            "ORDER BY valid_at DESC",
-            (project_name, project_path),
-        ).fetchall()
-        conn.close()
+        with closing(sqlite3.connect(str(memory_db))) as conn:
+            rows = conn.execute(
+                "SELECT id, fact_type, content, valid_at FROM facts "
+                "WHERE (project = ? OR project = ?) AND invalid_at IS NULL "
+                "ORDER BY valid_at DESC",
+                (project_name, project_path),
+            ).fetchall()
         return [
             {"id": r[0], "fact_type": r[1], "content": r[2], "valid_at": r[3]}
             for r in rows

@@ -9,6 +9,15 @@ import pytest
 from typer.testing import CliRunner
 
 ROOT = Path(__file__).resolve().parents[1]
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+# CI (GITHUB_ACTIONS / FORCE_COLOR) makes Rich colorize help, which splits flag
+# names with escape codes; strip them and use a wide terminal so nothing wraps.
+_ENV = {"COLUMNS": "250", "TERM": "dumb", "NO_COLOR": "1"}
+
+
+def _help(app, args):
+    r = CliRunner().invoke(app, [*args, "--help"], env=_ENV)
+    return r.exit_code, _ANSI.sub("", r.output)
 
 
 def _doc_commands():
@@ -32,11 +41,11 @@ def test_documented_commands_and_flags_exist(line):
         if w.startswith("-"):
             break
         path.append(w)
-        r = CliRunner().invoke(app, [*path, "--help"])
-        if r.exit_code != 0:  # positional argument, not a subcommand
+        code, _ = _help(app, path)
+        if code != 0:  # positional argument, not a subcommand
             path.pop()
             break
-    help_text = CliRunner().invoke(app, [*path, "--help"]).output
+    _, help_text = _help(app, path)
     flags = [w.split("=")[0] for w in words if w.startswith("--")]
     for flag in flags:
         assert flag in help_text, f"{line!r}: {flag} not in `devkit {' '.join(path)} --help`"

@@ -5,6 +5,7 @@ before any devkit module is imported, and the directories are wiped per test.
 """
 from __future__ import annotations
 
+import gc
 import hashlib
 import os
 import shutil
@@ -23,8 +24,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 @pytest.fixture(autouse=True)
 def clean_home():
+    gc.collect()  # drop any stray connection objects before deleting their files
     for d in (_ROOT / "devkit", _ROOT / "claude"):
-        shutil.rmtree(d, ignore_errors=True)
+        if d.exists():
+            # No ignore_errors: if a file is still open (e.g. a leaked SQLite
+            # connection locking it on Windows) we want to know, not share state.
+            shutil.rmtree(d)
         d.mkdir(parents=True)
     yield _ROOT
 
