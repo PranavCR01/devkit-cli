@@ -2,17 +2,17 @@
  "scene": "scan_badkey",
  "steps": [
   {
-   "cmd": "devkit config set anthropic_api_key sk-ant-revoked-demo-key",
-   "display": "devkit config set anthropic_api_key sk-ant-revoked-demo-key",
+   "cmd": "devkit config set anthropic_api_key not-a-real-key",
+   "display": "devkit config set anthropic_api_key not-a-real-key",
    "output": "\u001b[32mOK\u001b[0m anthropic_api_key = ****\n",
-   "seconds": 1.4,
+   "seconds": 1.5,
    "code": 0
   },
   {
    "cmd": "devkit scan . --no-semgrep",
    "display": "devkit scan . --no-semgrep",
-   "output": "\n\u001b[1mDevKit Security Scan\u001b[0m -- \n\u001b[35m~/demo/\u001b[0m\u001b[95macme-billing\u001b[0m\nMode: all | Files: \u001b[1;36m7\u001b[0m | Lines: \u001b[1;36m70\u001b[0m | Time: \u001b[1;36m0.\u001b[0m11s\nGraph-guided: YES\n\nGrade: \u001b[33mINCOMPLETE\u001b[0m  |  Security: \u001b[1;36m100\u001b[0m  |  Quality: \u001b[1;36m100\u001b[0m\n\u001b[33mPartial scan: scores cover only what was analyzed \u001b[0m\u001b[1;33m(\u001b[0m\u001b[33mprovisional grade A\u001b[0m\u001b[1;33m)\u001b[0m\u001b[33m.\u001b[0m\n\u001b[1;33m[\u001b[0m\u001b[33mWARN\u001b[0m\u001b[1;33m]\u001b[0m Claude analysis failed for \u001b[1;36m1\u001b[0m/\u001b[1;36m1\u001b[0m \u001b[1;35mchunk\u001b[0m\u001b[1m(\u001b[0ms\u001b[1m)\u001b[0m: AuthenticationError: Error code: \u001b[1;36m401\u001b[0m - \u001b[1m{\u001b[0m\u001b[32m'type'\u001b[0m: \u001b[32m'error'\u001b[0m,\n\u001b[32m'error'\u001b[0m: \u001b[1m{\u001b[0m\u001b[32m'type'\u001b[0m: \u001b[32m'authentication_error'\u001b[0m, \u001b[32m'message'\u001b[0m: \u001b[32m'invalid x-api-key'\u001b[0m\u001b[1m}\u001b[0m, \u001b[32m'request_id'\u001b[0m: \n\u001b[32m'req_011Cgj5Z721La1ryqgu1kT7j'\u001b[0m\u001b[1m}\u001b[0m\n\nNo findings in the analyzed code.\n",
-   "seconds": 1.6,
+   "output": "\n\u001b[1mDevKit Security Scan\u001b[0m -- \u001b[35m~/demo/\u001b[0m\u001b[95macme-billing\u001b[0m\nMode: all | Files: \u001b[1;36m7\u001b[0m | Lines: \u001b[1;36m70\u001b[0m | Time: \u001b[1;36m0.\u001b[0m08s\nGraph-guided: YES\n\nGrade: \u001b[33mINCOMPLETE\u001b[0m  |  Security: \u001b[1;36m100\u001b[0m  |  Quality: \u001b[1;36m100\u001b[0m\n\u001b[33mPartial scan: scores cover only what was analyzed \u001b[0m\u001b[1;33m(\u001b[0m\u001b[33mprovisional grade A\u001b[0m\u001b[1;33m)\u001b[0m\u001b[33m.\u001b[0m\n\u001b[1;33m[\u001b[0m\u001b[33mWARN\u001b[0m\u001b[1;33m]\u001b[0m Claude analysis failed for \u001b[1;36m1\u001b[0m/\u001b[1;36m1\u001b[0m \u001b[1;35mchunk\u001b[0m\u001b[1m(\u001b[0ms\u001b[1m)\u001b[0m: AuthenticationError: Error code: \u001b[1;36m401\u001b[0m - \u001b[1m{\u001b[0m\u001b[32m'type'\u001b[0m: \u001b[32m'error'\u001b[0m,\n\u001b[32m'error'\u001b[0m: \u001b[1m{\u001b[0m\u001b[32m'type'\u001b[0m: \u001b[32m'authentication_error'\u001b[0m, \u001b[32m'message'\u001b[0m: \u001b[32m'Invalid bearer token'\u001b[0m\u001b[1m}\u001b[0m, \u001b[32m'request_id'\u001b[0m: \n\u001b[32m'req_011CgkLicqe7kxS1pVmkXtgr'\u001b[0m\u001b[1m}\u001b[0m\n\nNo findings in the analyzed code.\n",
+   "seconds": 8.3,
    "code": 0
   }
  ]

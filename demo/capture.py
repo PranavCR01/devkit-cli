@@ -58,7 +58,7 @@ SCENES: dict[str, tuple[Path, list[tuple[str, str | None]]]] = {
     "app": (APP, [("ls", None), ("sed -n 17,24p app.py", None)]),
     "scan": (APP, [("devkit scan . --no-semgrep", "devkit scan . --no-semgrep")]),
     "scan_badkey": (APP, [
-        ("devkit config set anthropic_api_key sk-ant-revoked-demo-key", None),
+        ("devkit config set anthropic_api_key not-a-real-key", None),
         ("devkit scan . --no-semgrep", None),
         # hidden: drop the bad key so the env key is used again (not shown on screen)
         ("python3 -c \"import json,os;p=os.environ['DEVKIT_HOME']+'/config.json';d=json.load(open(p));d.pop('anthropic_api_key',None);json.dump(d,open(p,'w'))\"", ""),

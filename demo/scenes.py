@@ -38,7 +38,7 @@ SCENES = [
              scroll_to=r"\[4\]"),
     ]),
     TermScene("scan_badkey", T, [
-        Beat("Every Claude call failed on a revoked key. Instead of a clean 'A', DevKit reports INCOMPLETE and says why.", 5,
+        Beat("Every Claude call failed on an invalid API key. Instead of a clean 'A', DevKit reports INCOMPLETE and says why.", 5,
              scroll_to=r"DevKit Security Scan"),
     ]),
     # ── act 3: eval ──
